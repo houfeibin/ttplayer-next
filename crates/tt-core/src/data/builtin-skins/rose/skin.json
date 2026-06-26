@@ -1,0 +1,37 @@
+{
+  "name": "玫瑰红",
+  "version": "1.0",
+  "author": "TTPlayer",
+  "description": "优雅的玫瑰红主题",
+  "colors": {
+    "bg_primary": "#1a0a10",
+    "bg_secondary": "#2a1018",
+    "bg_tertiary": "#3a1828",
+    "text_primary": "#ffd0e0",
+    "text_secondary": "#cc8098",
+    "highlight": "#ffffff",
+    "accent": "#e11d48",
+    "accent_hover": "#f43f5e",
+    "accent_light": "#fda4af",
+    "progress_fill": "#e11d48",
+    "progress_bg": "#2a0a15",
+    "border_color": "#4a2030",
+    "panel_bg": "#1a0a10",
+    "button_bg": "#2a1018",
+    "button_hover": "#3a1828",
+    "spectrum_top": "#e11d48",
+    "spectrum_bottom": "#9f1239",
+    "spectrum_peak": "#fda4af"
+  },
+  "layout": {
+    "player_width": 327,
+    "player_height": 186,
+    "border_radius": 6
+  },
+  "fonts": {
+    "title": "'Segoe UI', 'Microsoft YaHei', sans-serif",
+    "body": "'Segoe UI', 'Microsoft YaHei', sans-serif"
+  },
+  "backgrounds": {},
+  "images": {}
+}

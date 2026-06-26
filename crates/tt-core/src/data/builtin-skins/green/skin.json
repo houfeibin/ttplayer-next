@@ -1,0 +1,38 @@
+{
+  "name": "翠绿现代",
+  "version": "1.0",
+  "author": "TTPlayer",
+  "description": "简洁现代的绿色主题",
+  "colors": {
+    "bg_primary": "#0a0a0a",
+    "bg_secondary": "#141414",
+    "bg_tertiary": "#1e1e1e",
+    "text_primary": "#f0f0f0",
+    "text_secondary": "#888888",
+    "highlight": "#ffffff",
+    "accent": "#22c55e",
+    "accent_hover": "#4ade80",
+    "accent_light": "#86efac",
+    "progress_fill": "#22c55e",
+    "progress_bg": "#1a1a1a",
+    "border_color": "#2a2a2a",
+    "panel_bg": "#0a0a0a",
+    "button_bg": "#1e1e1e",
+    "button_hover": "#2a2a2a",
+    "spectrum_top": "#22c55e",
+    "spectrum_bottom": "#15803d",
+    "spectrum_peak": "#86efac"
+  },
+  "layout": {
+    "player_width": 327,
+    "player_height": 186,
+    "border_radius": 8
+  },
+  "fonts": {
+    "title": "'Inter', 'Segoe UI', sans-serif",
+    "body": "'Inter', 'Segoe UI', sans-serif",
+    "mono": "'JetBrains Mono', 'Consolas', monospace"
+  },
+  "backgrounds": {},
+  "images": {}
+}

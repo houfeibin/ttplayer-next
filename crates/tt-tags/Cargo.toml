@@ -1,0 +1,10 @@
+[package]
+name = "tt-tags"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tt-common = { path = "../tt-common" }
+lofty.workspace = true
+anyhow.workspace = true
+base64 = "0.22"

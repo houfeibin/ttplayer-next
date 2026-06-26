@@ -1,0 +1,9 @@
+pub mod convert;
+pub mod desktop_lyrics;
+pub mod file_props;
+pub mod lyrics;
+pub mod player;
+pub mod playlist;
+pub mod skin;
+pub mod tags;
+pub mod theme;

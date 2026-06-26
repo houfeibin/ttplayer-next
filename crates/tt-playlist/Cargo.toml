@@ -1,0 +1,14 @@
+[package]
+name = "tt-playlist"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tt-common = { path = "../tt-common" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+rand.workspace = true
+dirs.workspace = true
+tracing.workspace = true

@@ -1,0 +1,60 @@
+{
+  "name": "Neon Blue",
+  "version": "1.0",
+  "author": "TTPlayer",
+  "description": "赛博朋克蓝光主题，带背景图片和按钮图片",
+  "colors": {
+    "bg_primary": "#0a1628",
+    "bg_secondary": "#0d2137",
+    "bg_tertiary": "#061320",
+    "text_primary": "#c0e8ff",
+    "text_secondary": "#5ba8d0",
+    "highlight": "#00d4ff",
+    "accent": "#00b4d8",
+    "accent_hover": "#48cae4",
+    "progress_fill": "#00b4d8",
+    "progress_bg": "#0a2240",
+    "border_color": "#0a3060",
+    "panel_bg": "#0a1628",
+    "button_bg": "rgba(0, 180, 216, 0.1)",
+    "button_hover": "rgba(0, 180, 216, 0.2)",
+    "spectrum_top": "#00d4ff",
+    "spectrum_bottom": "#0077b6",
+    "spectrum_peak": "#90e0ef"
+  },
+  "layout": {
+    "border_radius": 3
+  },
+  "fonts": {
+    "title": "Consolas, 'Microsoft YaHei', monospace",
+    "body": "Consolas, 'Microsoft YaHei', monospace"
+  },
+  "backgrounds": {
+    "panel": {
+      "image": "assets/panel-bg.svg",
+      "size": "cover",
+      "position": "center",
+      "repeat": "no-repeat"
+    },
+    "playlist": {
+      "image": "assets/playlist-bg.svg",
+      "size": "cover",
+      "position": "center",
+      "repeat": "no-repeat"
+    }
+  },
+  "images": {
+    "play": {
+      "normal": "assets/play.svg",
+      "hover": "assets/play.svg"
+    },
+    "prev": {
+      "normal": "assets/prev.svg",
+      "hover": "assets/prev.svg"
+    },
+    "next": {
+      "normal": "assets/next.svg",
+      "hover": "assets/next.svg"
+    }
+  }
+}

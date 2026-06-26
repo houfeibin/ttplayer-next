@@ -1,0 +1,251 @@
+/* ═══════════════════════════════════════════════════════
+   LyricsPanel — 精致版歌词样式（适配深浅模式）
+   ═══════════════════════════════════════════════════════ */
+
+.section {
+  flex: 1;
+  min-height: 60px;
+  background: rgba(var(--text-primary-rgb, 255, 255, 255), 0.03);
+  border-radius: 18px;
+  border: 1px solid var(--border-color, #3a2a5a);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  backdrop-filter: blur(2px);
+  position: relative;
+}
+
+/* Spectrum background layer — sits behind all content */
+.spectrumBg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.12;
+  pointer-events: none;
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+/* All content layers stack above spectrum */
+.header,
+.lines,
+.empty,
+.searchBox,
+.searchResults {
+  position: relative;
+  z-index: 1;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 18px 4px 18px;
+  flex-shrink: 0;
+}
+
+.headerTitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.5));
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.45));
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn:hover {
+  color: var(--text-primary, rgba(255, 255, 255, 0.7));
+  background: rgba(var(--text-primary-rgb, 255, 255, 255), 0.06);
+}
+
+.btnActive {
+  color: var(--accent-light, #C4B5FD);
+  background: rgba(var(--accent-rgb, 124, 108, 240), 0.12);
+}
+
+.offsetBadge {
+  font-size: 10px;
+  color: #FBBF24;
+  background: rgba(251, 191, 36, 0.1);
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 191, 36, 0.15);
+}
+
+/* 歌词行容器 */
+.lines {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 18px 12px 18px;
+  scroll-behavior: smooth;
+}
+
+.lines::-webkit-scrollbar {
+  width: 4px;
+}
+.lines::-webkit-scrollbar-track {
+  background: transparent;
+}
+.lines::-webkit-scrollbar-thumb {
+  background: rgba(var(--accent-rgb, 124, 108, 240), 0.2);
+  border-radius: 10px;
+}
+
+/* 歌词行 */
+.line {
+  font-size: var(--lyrics-font-size, 14px);
+  line-height: var(--lyrics-line-height, 2);
+  color: var(--text-secondary, rgba(255, 255, 255, 0.45));
+  transition: all 0.25s;
+  padding: 0 6px;
+  border-radius: 6px;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.line:hover {
+  background: rgba(var(--text-primary-rgb, 255, 255, 255), 0.04);
+}
+
+.active {
+  color: var(--text-primary, #F0F0FF);
+  font-weight: 500;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb, 124, 108, 240), 0.1), transparent);
+  padding: 0 14px;
+  margin: 0 -14px;
+  border-left: 3px solid var(--accent, #7c3aed);
+  text-shadow: 0 0 12px rgba(var(--accent-rgb, 124, 108, 240), 0.3), 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.past {
+  color: var(--text-secondary, rgba(255, 255, 255, 0.25));
+}
+
+.lineText {
+  display: inline-block;
+}
+
+.karaokeLine {
+  display: inline;
+}
+
+.word {
+  display: inline;
+  transition: color 0.15s ease, text-shadow 0.15s ease;
+}
+
+.wordSung {
+  color: var(--accent-light, #C4B5FD);
+  text-shadow: 0 0 6px rgba(var(--accent-rgb, 124, 108, 240), 0.4);
+}
+
+/* ─── 搜索 ─── */
+.searchBox {
+  display: flex;
+  gap: 6px;
+  padding: 4px 18px;
+  flex-shrink: 0;
+}
+
+.searchInput {
+  flex: 1;
+  background: rgba(var(--text-primary-rgb, 255, 255, 255), 0.06);
+  border: 1px solid var(--border-color, #3a2a5a);
+  color: var(--text-primary, rgba(255, 255, 255, 0.85));
+  padding: 5px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.searchInput::placeholder {
+  color: var(--text-secondary, rgba(255, 255, 255, 0.35));
+}
+
+.searchInput:focus {
+  border-color: rgba(var(--accent-rgb, 124, 108, 240), 0.4);
+}
+
+.searchResults {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  padding: 4px 18px;
+}
+
+.searchResult {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.searchResult:hover {
+  background: rgba(var(--accent-rgb, 124, 108, 240), 0.08);
+}
+
+.resultTitle {
+  font-size: 12px;
+  color: var(--text-primary, rgba(255, 255, 255, 0.85));
+  font-weight: 500;
+}
+
+.resultArtist {
+  font-size: 11px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.5));
+}
+
+.resultAlbum {
+  font-size: 10px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.35));
+  margin-left: auto;
+}
+
+/* ─── 空状态 ─── */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 20px;
+  flex: 1;
+}
+
+.emptyIcon {
+  font-size: 24px;
+  opacity: 0.35;
+}
+
+.emptyText {
+  font-size: 12px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.45));
+}
+
+.emptyHint {
+  font-size: 10px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.3));
+}

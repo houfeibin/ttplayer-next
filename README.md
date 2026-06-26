@@ -1,0 +1,497 @@
+# TTPlayer-Next
+
+<p align="center">
+  <strong>一款基于 Tauri 2 + Rust + React 19 的现代化跨平台桌面音乐播放器</strong>
+</p>
+
+<p align="center">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-blue">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-1.96+-orange">
+  <img alt="React" src="https://img.shields.io/badge/React-19-black">
+  <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-purple">
+  <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/ttplayer-next/ttplayer-next/ci.yml?label=CI">
+</p>
+
+---
+
+## 目录
+
+- [项目概述](#项目概述)
+- [核心功能](#核心功能)
+- [技术栈](#技术栈)
+- [项目结构](#项目结构)
+- [环境要求](#环境要求)
+- [快速开始](#快速开始)
+- [使用指南](#使用指南)
+- [命令 API 参考](#命令-api-参考)
+- [开发指南](#开发指南)
+- [测试](#测试)
+- [贡献规范](#贡献规范)
+- [许可证](#许可证)
+- [联系方式](#联系方式)
+
+---
+
+## 项目概述
+
+TTPlayer-Next 是一款高性能、轻量级的跨平台桌面音乐播放器，采用 Tauri 2 框架构建，前端使用 React 19 + TypeScript，后端音频引擎完全由 Rust 实现。它支持多种音频格式、实时频谱可视化、歌词同步、桌面歌词、均衡器、皮肤系统等丰富功能，目标是提供 Winamp 时代的精简体验同时融入现代 UI 与跨平台能力。
+
+- 跨平台：Windows / macOS / Linux
+- 原生性能：Rust 实现的音频解码、DSP 与输出
+- 小体积：最终打包体积远小于 Electron 方案
+- 可定制：支持皮肤系统、主题切换、桌面歌词样式自定义
+
+## 核心功能
+
+### 播放与音频
+
+- 多格式解码：MP3、FLAC、WAV、AAC、ALAC、Vorbis、OGG、AC3、APE、XM/Module 音乐
+- 播放控制：播放 / 暂停 / 停止 / 上一首 / 下一首 / 跳转进度
+- 音量控制与静音
+- 播放模式：顺序、循环、随机、单曲循环
+- 交叉淡入淡出（Crossfade）
+- 环绕声宽度调节
+- 实时频谱分析器（256 频段下采样为 64 频段，20fps 推送）
+
+### 均衡器
+
+- 多频段均衡器
+- 前置增益（Preamp）调节
+- 一键重置
+
+### 歌词
+
+- 本地歌词加载（支持多种格式）
+- 在线歌词搜索与下载
+- 自动匹配歌词
+- 歌词保存到文件
+- 桌面歌词悬浮窗（独立窗口，支持字体、颜色、大小自定义）
+- 卡拉OK式逐行高亮
+
+### 播放列表
+
+- 添加文件 / 文件夹
+- 拖放排序
+- 删除 / 清空
+- 自动持久化（防抖写入）
+
+### 元数据与标签
+
+- 读取音频文件属性（比特率、采样率、时长等）
+- 标签编辑（ID3v2、FLAC、APE 等）
+- 文件属性对话框
+
+### 格式转换
+
+- 音频格式转换
+- 多格式输出支持
+
+### 个性化
+
+- 皮肤系统：安装、切换、管理自定义皮肤（.ttskin 包）
+- 主题模式：亮色 / 暗色
+- 迷你模式
+- 全局热键支持
+
+### 系统集成
+
+- 系统托盘图标
+- 全局快捷键
+- 优雅退出（刷新未保存的播放列表）
+
+## 技术栈
+
+### 前端
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| [React](https://react.dev) | 19 | UI 框架 |
+| [TypeScript](https://www.typescriptlang.org) | 5.7 | 类型安全 |
+| [Vite](https://vitejs.dev) | 6 | 构建工具与开发服务器 |
+| [Zustand](https://github.com/pmndrs/zustand) | 5 | 状态管理 |
+| [Vitest](https://vitest.dev) | 3 | 单元测试 |
+| [Playwright](https://playwright.dev) | 1.40+ | 端到端测试 |
+| [Biome](https://biomejs.dev) | - | Lint 与格式化 |
+
+### 后端（Rust）
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| [Tauri](https://tauri.app) | 2 | 桌面应用框架 |
+| Rust Edition | 2024 | - |
+| [Symphonia](https://github.com/pdeljanov/Symphonia) | 0.6 | 音频解码（AAC/FLAC/MP3/Vorbis/WAV 等） |
+| [cpal](https://github.com/RustAudio/cpal) | 0.15 | 跨平台音频输出 |
+| [rustfft](https://github.com/mehcode/rustfft) | 6 | FFT 频谱分析 |
+| [rubato](https://github.com/HEnquist/rubato) | 0.14 | 音频重采样 |
+| [lofty](https://github.com/Serial-ATA/lofty-rs) | 0.21 | 音频标签读写 |
+| [xmrs](https://github.com/jrmuizel/xmrs) | 0.14 | Module 音乐格式 |
+| [ape-decoder](https://crates.io/crates/ape-decoder) | 0.3 | APE 格式解码 |
+| [oxideav-ac3](https://crates.io/crates/oxideav-ac3) | 0.0.9 | AC3 解码 |
+| [reqwest](https://github.com/seanmonstar/reqwest) | 0.12 | HTTP 请求（在线歌词） |
+| [tokio](https://tokio.rs) | 1 | 异步运行时 |
+| [parking_lot](https://github.com/Amanieu/parking_lot) | 0.12 | 高性能同步原语 |
+| [tracing](https://github.com/tokio-rs/tracing) | 0.1 | 结构化日志 |
+| [criterion](https://github.com/bheisler/criterion.rs) | 0.5 | 性能基准测试 |
+
+## 项目结构
+
+```
+ttplayer-next/
+├── src/                          # React 前端
+│   ├── components/
+│   │   ├── MainPanel/            # 主面板（播放控制、频谱、歌词、播放列表）
+│   │   │   ├── Equalizer.tsx
+│   │   │   ├── LyricsPanel.tsx
+│   │   │   ├── Spectrum.tsx
+│   │   │   └── MainPanel.tsx
+│   │   ├── SettingsPanel.tsx     # 设置面板
+│   │   ├── TagEditor.tsx         # 标签编辑器
+│   │   ├── FormatConverter.tsx   # 格式转换器
+│   │   ├── FilePropertiesDialog.tsx
+│   │   ├── MiniMode.tsx          # 迷你模式
+│   │   └── SkinSelector.tsx     # 皮肤选择器
+│   ├── hooks/                    # React Hooks
+│   ├── stores/                   # Zustand 状态管理
+│   ├── skins/                    # 内置皮肤资源
+│   ├── utils/                    # 工具函数（IPC 封装等）
+│   └── App.tsx
+├── src-tauri/                    # Tauri 应用（Rust）
+│   ├── src/
+│   │   ├── commands/             # Tauri 命令处理器
+│   │   │   ├── player.rs
+│   │   │   ├── playlist.rs
+│   │   │   ├── lyrics.rs
+│   │   │   ├── tags.rs
+│   │   │   ├── convert.rs
+│   │   │   ├── skin.rs
+│   │   │   ├── desktop_lyrics.rs
+│   │   │   └── ...
+│   │   ├── hotkeys.rs            # 全局快捷键
+│   │   ├── tray.rs               # 系统托盘
+│   │   └── state.rs              # 应用状态
+│   └── tauri.conf.json           # Tauri 配置
+├── crates/                       # Rust 工作区子项目
+│   ├── tt-common/                # 通用类型与常量
+│   ├── tt-core/                  # 音频核心引擎
+│   │   └── src/
+│   │       ├── codecs/           # 编解码器适配
+│   │       ├── dsp/              # 数字信号处理（EQ、淡入淡出、频谱、环绕）
+│   │       ├── lyrics/           # 歌词解析与同步
+│   │       └── player/           # 播放器传输层
+│   ├── tt-tags/                  # 标签读写
+│   └── tt-playlist/              # 播放列表管理
+├── e2e/                          # Playwright 端到端测试
+├── .github/workflows/            # CI 配置
+└── Cargo.toml                    # Rust 工作区根配置
+```
+
+## 环境要求
+
+### 通用要求
+
+- [Node.js](https://nodejs.org/) >= 20
+- [npm](https://www.npmjs.com/) >= 10（或 pnpm / yarn）
+- [Rust](https://www.rust-lang.org/tools/install) >= 1.96（Edition 2024）
+
+### 平台特定依赖
+
+**Windows**
+- MSVC 构建工具（Visual Studio Build Tools）
+- WebView2（Windows 10/11 通常已预装）
+
+**macOS**
+- Xcode Command Line Tools
+```bash
+xcode-select --install
+```
+
+**Linux**（Debian/Ubuntu）
+```bash
+sudo apt-get install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev pkg-config
+```
+
+## 快速开始
+
+### 1. 克隆仓库
+
+```bash
+git clone https://github.com/ttplayer-next/ttplayer-next.git
+cd ttplayer-next
+```
+
+### 2. 安装前端依赖
+
+```bash
+npm install
+```
+
+### 3. 开发模式运行
+
+```bash
+npm run tauri dev
+```
+
+此命令会同时启动 Vite 开发服务器（`http://localhost:5173`）和 Tauri 后端开发构建，首次运行会编译 Rust 依赖，耗时较长。
+
+### 4. 构建生产版本
+
+```bash
+npm run tauri build
+```
+
+构建产物位于 `src-tauri/target/release/bundle/`，包含对应平台的安装包。
+
+## 使用指南
+
+### 基本操作
+
+1. **打开文件**：点击「添加」按钮选择音频文件，或直接拖放文件到窗口
+2. **播放控制**：使用底部播放栏的播放/暂停/上一首/下一首按钮
+3. **音量**：拖动音量滑块调节
+4. **进度跳转**：点击进度条任意位置跳转
+
+### 歌词
+
+- 加载本地歌词：在歌词面板右键选择「加载歌词文件」
+- 在线搜索：选择「在线搜索歌词」并从结果中选择
+- 桌面歌词：在设置中开启桌面歌词悬浮窗
+
+### 均衡器
+
+- 点击工具栏的均衡器图标打开
+- 调节各频段增益
+- 可调整前置增益
+- 点击「重置」恢复默认
+
+### 皮肤
+
+- 点击皮肤选择器图标
+- 选择已安装的皮肤
+- 安装新皮肤：选择 `.ttskin` 文件
+
+### 迷你模式
+
+- 切换至迷你模式以节省桌面空间
+- 再次点击恢复完整界面
+
+### 全局快捷键
+
+应用支持全局媒体快捷键，可在系统托盘菜单中查看与管理。
+
+## 命令 API 参考
+
+TTPlayer-Next 通过 Tauri 的 IPC 机制暴露了一系列命令，前端通过 `@tauri-apps/api` 的 `invoke` 调用。以下是主要命令分组：
+
+### 播放控制
+
+| 命令 | 说明 |
+|------|------|
+| `player_play` | 播放当前曲目 |
+| `player_pause` | 暂停 |
+| `player_stop` | 停止 |
+| `player_toggle` | 播放/暂停切换 |
+| `player_get_state` | 获取播放状态 |
+| `player_seek` | 跳转到指定位置（毫秒） |
+| `player_set_volume` | 设置音量（0-100） |
+
+### 均衡器
+
+| 命令 | 说明 |
+|------|------|
+| `eq_get_bands` | 获取各频段增益 |
+| `eq_set_band` | 设置指定频段增益 |
+| `eq_get_preamp` | 获取前置增益 |
+| `eq_set_preamp` | 设置前置增益 |
+| `eq_reset` | 重置均衡器 |
+
+### 播放列表
+
+| 命令 | 说明 |
+|------|------|
+| `playlist_add_files` | 添加文件 |
+| `playlist_add_folder` | 添加文件夹 |
+| `playlist_get_items` | 获取列表项 |
+| `playlist_next` / `playlist_prev` | 上一首 / 下一首 |
+| `playlist_play_index` | 播放指定索引 |
+| `playlist_clear` | 清空列表 |
+| `playlist_remove` | 移除指定项 |
+| `playlist_move_item` | 移动列表项 |
+| `playlist_get_play_mode` / `playlist_set_play_mode` | 获取/设置播放模式 |
+
+### 歌词
+
+| 命令 | 说明 |
+|------|------|
+| `lyrics_load` | 加载本地歌词 |
+| `lyrics_search` | 搜索歌词 |
+| `lyrics_auto_load` | 自动匹配加载 |
+| `lyrics_search_online` | 在线搜索 |
+| `lyrics_load_online` | 加载在线歌词 |
+| `lyrics_save_to_file` | 保存歌词到文件 |
+| `lyrics_get_lines` | 获取歌词行 |
+| `lyrics_get_servers` / `lyrics_set_servers` | 获取/设置歌词服务器 |
+
+### 标签与文件
+
+| 命令 | 说明 |
+|------|------|
+| `tags_read` / `tags_write` | 读取/写入标签 |
+| `file_get_properties` | 获取文件属性 |
+
+### 格式转换
+
+| 命令 | 说明 |
+|------|------|
+| `convert_files` | 转换音频文件 |
+| `convert_get_formats` | 获取支持的输出格式 |
+
+### 皮肤与主题
+
+| 命令 | 说明 |
+|------|------|
+| `skin_list` | 列出已安装皮肤 |
+| `skin_apply` | 应用皮肤 |
+| `skin_install` | 安装皮肤 |
+| `skin_delete` | 删除皮肤 |
+| `theme_get_mode` / `theme_set_mode` | 获取/设置主题 |
+
+### 桌面歌词
+
+| 命令 | 说明 |
+|------|------|
+| `desktop_lyrics_get` | 获取桌面歌词设置 |
+| `desktop_lyrics_set` | 更新桌面歌词设置 |
+| `desktop_lyrics_reset` | 重置为默认 |
+
+### 事件
+
+后端通过 `app_handle.emit` 推送事件，前端使用 `listen` 监听：
+
+| 事件 | 说明 |
+|------|------|
+| `player-state-update` | 播放状态更新（约 20fps，含位置、音量、频谱、歌词） |
+| `desktop-lyrics-settings-changed` | 桌面歌词设置变更（跨窗口同步） |
+
+> 注：`desktop_lyrics_set` 命令参数使用 camelCase 键名（`fontSize`、`fontFamily`、`fontColor`），Tauri 2 会自动转换为 Rust 的 snake_case 参数。
+
+## 开发指南
+
+### 常用脚本
+
+```bash
+# 开发
+npm run tauri dev
+
+# 前端开发服务器（仅 UI）
+npm run dev
+
+# 类型检查 + 构建
+npm run build
+
+# Lint
+npm run lint
+
+# 格式化
+npm run format
+```
+
+### Rust 开发
+
+```bash
+# 检查
+cargo check
+
+# 运行测试（库 crate）
+cargo test -p tt-common -p tt-core -p tt-tags -p tt-playlist
+
+# 性能基准测试
+cargo bench -p tt-core
+
+# Clippy 检查
+cargo clippy --all-targets
+
+# 格式化
+cargo fmt --all
+```
+
+### 架构说明
+
+- **事件推送线程**：后端在 `setup` 中启动一个后台线程，每 50ms（20fps）向前端推送 `player-state-update` 事件，包含播放状态、位置、音量、频谱（下采样 256→64 频段）、歌词同步信息。元数据（含 base64 封面图）仅在文件切换或标签异步读取完成时推送，避免每帧传输大体积数据。
+- **状态管理**：后端使用 `Arc<Mutex<...>>` 与 `parking_lot` 管理共享状态；前端使用 Zustand store 镜像后端状态。
+- **DSP 子系统**：均衡器、交叉淡入淡出、频谱分析、环绕声等均以独立子模块实现，使用各自的细粒度锁，避免阻塞传输层。
+- **歌词引擎**：随事件推送线程同步更新当前行索引与进度，前端无需单独轮询。
+
+### 编码规范
+
+- 前端使用 Biome 进行 lint 与格式化：`npm run lint` / `npm run format`
+- Rust 使用 rustfmt 与 clippy：`cargo fmt --all -- --check` / `cargo clippy`
+- UI 文本元素：主文本透明度 >= 0.7，次文本透明度 >= 0.5，确保可读性
+- 播放符号（播放/暂停）使用 `viewBox="0 0 24 24"` 的 SVG 图标，避免 Unicode 字符导致的对齐问题
+- 桌面歌词字体大小范围 12-48px，字体颜色使用 `#RRGGBB` 格式
+
+## 测试
+
+### 前端单元测试
+
+```bash
+npm run test          # 运行一次
+npm run test:watch    # 监听模式
+npm run test:ui       # UI 界面
+```
+
+### 端到端测试
+
+```bash
+npm run e2e           # 运行 Playwright 测试
+npm run e2e:ui        # UI 界面
+```
+
+### Rust 测试
+
+```bash
+cargo test -p tt-common -p tt-core -p tt-tags -p tt-playlist
+```
+
+## 贡献规范
+
+欢迎提交 Issue 与 Pull Request！请遵循以下流程：
+
+1. **Fork** 本仓库
+2. 创建特性分支：`git checkout -b feature/your-feature`
+3. 提交更改：请使用清晰的提交信息，说明「为什么」而不仅是「做了什么」
+4. 确保通过所有检查：
+   ```bash
+   npm run lint && npm run test && npm run build
+   cargo fmt --all -- --check && cargo clippy --all-targets
+   cargo test -p tt-common -p tt-core -p tt-tags -p tt-playlist
+   ```
+5. 提交 Pull Request 到 `main` 分支，并描述变更内容与动机
+
+### 提交信息约定
+
+建议使用约定式提交（Conventional Commits）格式：
+
+```
+<type>(<scope>): <subject>
+
+<body>
+```
+
+常用 type：`feat`（新功能）、`fix`（修复）、`refactor`（重构）、`docs`（文档）、`test`（测试）、`chore`（构建/工具）。
+
+## 许可证
+
+本项目基于 [MIT License](LICENSE) 开源。
+
+## 联系方式
+
+- 仓库地址：[https://github.com/ttplayer-next/ttplayer-next](https://github.com/ttplayer-next/ttplayer-next)
+- Issue 反馈：[https://github.com/ttplayer-next/ttplayer-next/issues](https://github.com/ttplayer-next/ttplayer-next/issues)
+
+---
+
+<p align="center">
+  如果本项目对您有帮助，欢迎 Star ⭐ 支持！
+</p>

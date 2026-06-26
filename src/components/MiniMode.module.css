@@ -1,0 +1,153 @@
+.mini {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(var(--accent-rgb, 124, 108, 240), 0.08) 0%, transparent 100%),
+    linear-gradient(180deg, var(--bg-primary, #0B0B12) 0%, var(--bg-secondary, #10101C) 100%);
+  border-radius: var(--border-radius, 12px);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.progressTrack {
+  width: 100%;
+  height: 3px;
+  background: rgba(var(--text-primary-rgb, 255, 255, 255), 0.1);
+  flex-shrink: 0;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent, #7c3aed), var(--accent-hover, #8b5cf6));
+  transition: width 0.3s linear;
+}
+
+.body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Track info */
+.info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #F0F0FF);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.artist {
+  font-size: 11px;
+  color: var(--text-secondary, rgba(255,255,255,0.5));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.time {
+  font-size: 10px;
+  color: rgba(var(--text-primary-rgb, 255, 255, 255), 0.35);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+/* Playback controls */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px;
+  border-radius: 6px;
+  color: rgba(var(--text-primary-rgb, 255, 255, 255), 0.45);
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+}
+
+.btn:hover {
+  background: rgba(var(--text-primary-rgb, 255, 255, 255), 0.08);
+  color: rgba(var(--text-primary-rgb, 255, 255, 255), 0.8);
+}
+
+.btnPlay {
+  width: 30px;
+  height: 30px;
+  background: linear-gradient(135deg, rgba(var(--accent-rgb, 124, 108, 240), 0.2), rgba(var(--accent-rgb, 124, 108, 240), 0.05));
+  color: var(--accent-light, #C4B5FD);
+  border-radius: 50%;
+  border: 1px solid rgba(var(--accent-rgb, 124, 108, 240), 0.2);
+  font-size: 14px;
+}
+
+.btnPlay:hover {
+  background: linear-gradient(135deg, rgba(var(--accent-rgb, 124, 108, 240), 0.3), rgba(var(--accent-rgb, 124, 108, 240), 0.1));
+  transform: scale(1.08);
+}
+
+/* Window control buttons */
+.winCtrls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.winBtn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: rgba(var(--text-primary-rgb, 255, 255, 255), 0.35);
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.winBtn:hover {
+  background: rgba(var(--text-primary-rgb, 255, 255, 255), 0.08);
+  color: rgba(var(--text-primary-rgb, 255, 255, 255), 0.6);
+}
+
+.winCloseBtn:hover {
+  background: #E94560;
+  color: #fff;
+}

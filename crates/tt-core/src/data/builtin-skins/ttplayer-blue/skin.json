@@ -1,0 +1,38 @@
+{
+  "name": "千千静听经典蓝",
+  "version": "1.0",
+  "author": "TTPlayer",
+  "description": "千千静听经典蓝色",
+  "colors": {
+    "bg_primary": "#1e2a3a",
+    "bg_secondary": "#263545",
+    "bg_tertiary": "#2d3f52",
+    "text_primary": "#c8dae8",
+    "text_secondary": "#8bacc4",
+    "highlight": "#ffffff",
+    "accent": "#4a8db7",
+    "accent_hover": "#5ca0cc",
+    "accent_light": "#90e0ef",
+    "progress_fill": "#4a8db7",
+    "progress_bg": "#1a2535",
+    "border_color": "#3a5068",
+    "panel_bg": "#1e2a3a",
+    "button_bg": "#2a3f55",
+    "button_hover": "#3a5570",
+    "spectrum_top": "#27435f",
+    "spectrum_bottom": "#1a3347",
+    "spectrum_peak": "#88aacb"
+  },
+  "layout": {
+    "player_width": 327,
+    "player_height": 186,
+    "border_radius": 3
+  },
+  "fonts": {
+    "title": "Tahoma, 'Microsoft YaHei', sans-serif",
+    "body": "Tahoma, 'Microsoft YaHei', sans-serif",
+    "mono": "'Courier New', monospace"
+  },
+  "backgrounds": {},
+  "images": {}
+}

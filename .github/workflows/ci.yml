@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # ── Rust: format, lint, and test the library crates ──
+  # The Tauri app binary (src-tauri) is intentionally excluded — it pulls in
+  # platform UI toolkits (webkit2gtk/gtk on Linux) whose system deps make the
+  # job slow and flaky. The pure-Rust crates (tt-common/tt-core/tt-tags/
+  # tt-playlist) hold all the audio/DSP/codec logic and are what regressions
+  # are most likely to break.
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install audio system deps (cpal ALSA backend)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      # Style gates are advisory for now (existing codebase isn't fully
+      # rustfmt/clippy-clean). They surface drift without blocking merges until
+      # the codebase is cleaned up enough to enforce them.
+      - name: rustfmt
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+      - name: clippy
+        continue-on-error: true
+        run: cargo clippy -p tt-common -p tt-core -p tt-tags -p tt-playlist --all-targets
+      - name: cargo test (library crates)
+        run: cargo test -p tt-common -p tt-core -p tt-tags -p tt-playlist
+
+  # ── Frontend: type-check, build, and unit-test the React app ──
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: unit tests (vitest)
+        run: npm run test
+      - name: type-check + build
+        run: npm run build
