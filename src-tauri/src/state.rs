@@ -153,12 +153,20 @@ impl AppState {
 
         let desktop_lyrics = crate::commands::desktop_lyrics::load_settings();
 
+        let lyrics_providers = {
+            let mut reg = LyricsProviderRegistry::with_defaults();
+            if let Some(tok) = crate::commands::lyrics::load_token() {
+                reg.set_token(tok);
+            }
+            Arc::new(RwLock::new(reg))
+        };
+
         Self {
             player,
             playlist,
             playlist_saver,
             lyrics: Arc::new(Mutex::new(LyricsEngine::new())),
-            lyrics_providers: Arc::new(RwLock::new(LyricsProviderRegistry::with_defaults())),
+            lyrics_providers,
             skin: Arc::new(Mutex::new(skin)),
             theme_mode,
             desktop_lyrics,

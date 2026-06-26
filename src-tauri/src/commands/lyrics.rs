@@ -111,18 +111,17 @@ pub async fn lyrics_get_metadata(
     }))
 }
 
-/// Search online lyrics providers.
+/// Search online lyrics provider.
 ///
-/// Uses the shared registry (reuses HTTP client + LRC caches across calls).
-/// Providers are queried in priority order with failover; the first server
-/// returning results wins. At most 10 results are returned.
+/// Requires a valid API token to be configured via `lyrics_set_token`.
+/// Returns an error if no token is set.
 #[tauri::command]
 pub async fn lyrics_search_online(
     state: State<'_, AppState>,
     keyword: String,
 ) -> Result<Vec<serde_json::Value>, String> {
     let registry = state.lyrics_providers.read().await;
-    let results = registry.search_with_failover(&keyword, 10).await;
+    let results = registry.search_with_failover(&keyword, 10).await?;
     Ok(results.iter().map(|r| {
         serde_json::json!({
             "id": r.id,
@@ -147,6 +146,9 @@ pub async fn lyrics_load_online(
     let registry = state.lyrics_providers.read().await;
     match registry.fetch(&source, &id).await {
         Ok(Some(lrc)) => {
+            if lrc.lines.is_empty() {
+                return Ok(false);
+            }
             let mut engine = state.lyrics.lock();
             engine.load(lrc);
             Ok(true)
@@ -156,28 +158,90 @@ pub async fn lyrics_load_online(
     }
 }
 
-/// Get the list of configured lyrics server URLs (in priority order).
-#[tauri::command]
-pub async fn lyrics_get_servers(
-    state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
-    let registry = state.lyrics_providers.read().await;
-    Ok(registry.get_servers())
+// ── Token management ──────────────────────────────────────────────────────
+
+/// Get the file path for persisting the lyrics API token.
+fn token_file_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("ttplayer-next").join("lyrics_token"))
 }
 
-/// Replace the lyrics server list.
+/// Load persisted token from disk, returning None if not found.
+pub fn load_token() -> Option<String> {
+    let path = token_file_path()?;
+    let content = std::fs::read_to_string(&path).ok()?;
+    let trimmed = content.trim().to_string();
+    if trimmed.is_empty() { None } else { Some(trimmed) }
+}
+
+/// Persist token to disk.
+fn save_token(token: &str) {
+    if let Some(path) = token_file_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, token);
+    }
+}
+
+/// Set the API token for online lyrics search.
 ///
-/// Each entry must be a 52VMY-compatible server base URL
-/// (e.g. `https://api.52vmy.cn`). Servers are queried in the order
-/// given; the first returning results wins (failover).
+/// The token is validated (non-empty, alphanumeric) and persisted to disk.
+/// Returns the current token after setting.
+#[tauri::command]
+pub async fn lyrics_set_token(
+    state: State<'_, AppState>,
+    token: String,
+) -> Result<String, String> {
+    let trimmed = token.trim().to_string();
+
+    // Validate: non-empty and alphanumeric
+    if trimmed.is_empty() {
+        return Err("Token 不能为空".into());
+    }
+    if !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err("Token 格式无效，仅允许字母、数字、下划线和连字符".into());
+    }
+
+    save_token(&trimmed);
+    let mut registry = state.lyrics_providers.write().await;
+    registry.set_token(trimmed);
+    Ok(registry.get_token().unwrap_or("").to_string())
+}
+
+/// Get the current API token (masked: only first 4 and last 4 chars shown).
+#[tauri::command]
+pub async fn lyrics_get_token(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let registry = state.lyrics_providers.read().await;
+    Ok(registry.get_token().unwrap_or("").to_string())
+}
+
+/// Check if a token is currently configured.
+#[tauri::command]
+pub async fn lyrics_has_token(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let registry = state.lyrics_providers.read().await;
+    Ok(registry.has_token())
+}
+
+// ── Legacy server management (no-ops, kept for backward compat) ───────────
+
+/// Get the list of configured lyrics server URLs (deprecated).
+#[tauri::command]
+pub async fn lyrics_get_servers() -> Result<Vec<String>, String> {
+    Ok(vec![tt_core::lyrics::OPENAPI_BASE_URL.to_string()])
+}
+
+/// Replace the lyrics server list (deprecated — no-op).
 #[tauri::command]
 pub async fn lyrics_set_servers(
-    state: State<'_, AppState>,
     urls: Vec<String>,
 ) -> Result<Vec<String>, String> {
-    let mut registry = state.lyrics_providers.write().await;
-    registry.set_servers(urls);
-    Ok(registry.get_servers())
+    // Token-based API now; server list is fixed.
+    let _ = urls;
+    Ok(vec![tt_core::lyrics::OPENAPI_BASE_URL.to_string()])
 }
 
 /// Save the currently loaded lyrics as `{audio_stem}.lrc` in the same

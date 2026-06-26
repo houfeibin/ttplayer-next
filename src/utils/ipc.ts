@@ -301,6 +301,23 @@ export async function lyricsSaveToFile(audioPath: string): Promise<string> {
   return invoke('lyrics_save_to_file', { audioPath });
 }
 
+// ── Token management ──────────────────────────────────────────────────────
+
+/** Set the API token for online lyrics search. Validates and persists the token. */
+export async function lyricsSetToken(token: string): Promise<string> {
+  return invoke('lyrics_set_token', { token });
+}
+
+/** Get the current API token (empty string if not set). */
+export async function lyricsGetToken(): Promise<string> {
+  return invoke('lyrics_get_token');
+}
+
+/** Check if a token is currently configured. */
+export async function lyricsHasToken(): Promise<boolean> {
+  return invoke('lyrics_has_token');
+}
+
 // ============================================================
 // Skin IPC
 // ============================================================

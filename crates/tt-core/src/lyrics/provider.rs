@@ -1,23 +1,14 @@
-/// Online lyrics provider — search and fetch lyrics from music platforms.
+/// Online lyrics provider — search and fetch lyrics via OpenAPI 52VMY.
 use crate::lyrics::parser::LrcFile;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use parking_lot::Mutex;
 
-/// Default 52VMY lyrics API URL (https://api.52vmy.cn).
+/// OpenAPI 52VMY lyrics endpoint (酷小狗歌词).
 ///
-/// Free lyrics API supporting search-by-keyword with multiple result versions
-/// (selected via the `n` parameter). Returns standard LRC text by default or
-/// JSON with `type=json`. QPS limit: 4 requests per 2 seconds.
-pub const DEFAULT_52VMY_URL: &str = "https://api.52vmy.cn";
-
-/// Default LRCLIB server URL (https://lrclib.net).
-///
-/// LRCLIB is an open-source lyrics database that returns **multiple search
-/// results** as a JSON array — each item includes both plain and synced (LRC)
-/// lyrics. This is the preferred provider because it directly supports the
-/// multi-result selection workflow.
-pub const DEFAULT_LRCLIB_URL: &str = "https://lrclib.net";
+/// API docs: https://openapi.52vmy.cn/docs/music/kg/lrc.html
+/// Endpoint: GET/POST /api/music/kg/lrc
+/// Params:   token (required), word (song name), n (result index)
+/// Returns:  raw LRC text with `[mm:ss.xx]` timestamps.
+pub const OPENAPI_BASE_URL: &str = "http://openapi.52vmy.cn";
 
 /// Search result from an online lyrics provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,33 +24,28 @@ pub struct LyricSearchResult {
 /// Online lyrics provider trait.
 #[async_trait::async_trait]
 pub trait LyricsProvider: Send + Sync {
-    /// Unique identifier for this provider instance (e.g. its base URL).
+    /// Unique identifier for this provider instance.
     fn name(&self) -> &str;
-    async fn search(&self, keyword: &str) -> anyhow::Result<Vec<LyricSearchResult>>;
-    async fn fetch_lrc(&self, id: &str) -> anyhow::Result<Option<LrcFile>>;
+    /// Search for lyrics by keyword. Returns multiple candidate results.
+    async fn search(&self, keyword: &str, token: &str) -> anyhow::Result<Vec<LyricSearchResult>>;
+    /// Fetch LRC lyrics by result id.
+    async fn fetch_lrc(&self, id: &str, token: &str) -> anyhow::Result<Option<LrcFile>>;
 }
 
-/// Registry of all lyrics providers.
-///
-/// Providers are ordered by priority (first = highest). `search_with_failover`
-/// queries them in order and returns the first non-empty result set, enabling
-/// automatic service switching when a server is down or has no match.
+/// Registry of lyrics providers. Also holds the API token.
 pub struct LyricsProviderRegistry {
     providers: Vec<Box<dyn LyricsProvider>>,
+    token: Option<String>,
 }
 
 impl LyricsProviderRegistry {
     pub fn new() -> Self {
-        Self { providers: Vec::new() }
+        Self { providers: Vec::new(), token: None }
     }
 
-    /// Create a registry with the default providers:
-    /// 1. LRCLIB — open lyrics database, returns multiple results with LRC
-    /// 2. 52VMY — free lyrics API, supports keyword search across versions
     pub fn with_defaults() -> Self {
         let mut reg = Self::new();
-        reg.register(Box::new(LrclibProvider::new(DEFAULT_LRCLIB_URL.to_string())));
-        reg.register(Box::new(FiftyTwoVmyProvider::new(DEFAULT_52VMY_URL.to_string())));
+        reg.register(Box::new(OpenApiProvider::new()));
         reg
     }
 
@@ -67,50 +53,40 @@ impl LyricsProviderRegistry {
         self.providers.push(provider);
     }
 
-    /// Replace the entire provider list with user-supplied servers.
-    ///
-    /// Each URL must point to a 52VMY-compatible lyrics API instance
-    /// implementing the `/api/music/lrc` endpoint.
-    ///
-    /// Empty/duplicate URLs are skipped. If all entries are filtered out,
-    /// the default 52VMY public server is restored so search never no-ops.
-    pub fn set_servers(&mut self, urls: Vec<String>) {
-        self.providers.clear();
-        let mut seen = std::collections::HashSet::new();
-        for url in urls {
-            let url = url.trim().to_string();
-            if url.is_empty() || !seen.insert(url.clone()) {
-                continue;
-            }
-            self.providers.push(Box::new(FiftyTwoVmyProvider::new(url)));
-        }
-        if self.providers.is_empty() {
-            self.providers.push(Box::new(FiftyTwoVmyProvider::new(
-                DEFAULT_52VMY_URL.to_string(),
-            )));
-        }
+    /// Set the API token. Empty string clears the token.
+    pub fn set_token(&mut self, token: String) {
+        let trimmed = token.trim().to_string();
+        self.token = if trimmed.is_empty() { None } else { Some(trimmed) };
     }
 
-    /// Current server URLs (provider names), in priority order.
-    pub fn get_servers(&self) -> Vec<String> {
-        self.providers.iter().map(|p| p.name().to_string()).collect()
+    /// Get the current token, if any.
+    pub fn get_token(&self) -> Option<&str> {
+        self.token.as_deref()
+    }
+
+    /// Whether a token has been configured.
+    pub fn has_token(&self) -> bool {
+        self.token.as_ref().map_or(false, |t| !t.is_empty())
     }
 
     /// Search with failover: query providers in order; the first one returning
     /// a non-empty result set wins and is truncated to `limit` entries.
     ///
-    /// If a provider errors or returns empty, the next is tried. Returns an
-    /// empty vec only when all providers are exhausted.
+    /// Returns an error string if no token is configured.
     pub async fn search_with_failover(
         &self,
         keyword: &str,
         limit: usize,
-    ) -> Vec<LyricSearchResult> {
+    ) -> Result<Vec<LyricSearchResult>, String> {
+        let token = self.token.as_deref().ok_or_else(|| {
+            "请先在设置中填写 API Token".to_string()
+        })?;
+
         for provider in &self.providers {
-            match provider.search(keyword).await {
+            match provider.search(keyword, token).await {
                 Ok(items) => {
                     if !items.is_empty() {
-                        return items.into_iter().take(limit).collect();
+                        return Ok(items.into_iter().take(limit).collect());
                     }
                     tracing::debug!(
                         "Lyrics provider '{}' returned 0 results, trying next",
@@ -126,344 +102,202 @@ impl LyricsProviderRegistry {
                 }
             }
         }
-        Vec::new()
+        Ok(Vec::new())
     }
 
     /// Fetch lyrics from a specific provider by name (base URL) and id.
     pub async fn fetch(&self, source: &str, id: &str) -> anyhow::Result<Option<LrcFile>> {
+        let token = self
+            .token
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("请先在设置中填写 API Token"))?;
+
         for provider in &self.providers {
             if provider.name() == source {
-                return provider.fetch_lrc(id).await;
+                return provider.fetch_lrc(id, token).await;
             }
         }
         Err(anyhow::anyhow!("Unknown provider: {}", source))
     }
 }
 
-// LRCLIB Provider (open lyrics database, e.g. https://lrclib.net)
+// ── OpenAPI 52VMY Provider ────────────────────────────────────────────────
 
-/// One entry in an LRCLIB `/api/search` JSON response.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LrclibSearchItem {
-    id: u64,
-    #[serde(default)]
-    track_name: String,
-    #[serde(default)]
-    artist_name: String,
-    #[serde(default)]
-    album_name: Option<String>,
-    /// Duration in seconds (f64).
-    #[serde(default)]
-    duration: Option<f64>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    instrumental: bool,
-    /// Synced LRC lyrics (may be null).
-    #[serde(default)]
-    synced_lyrics: Option<String>,
-    /// Plain text lyrics (may be null).
-    #[serde(default)]
-    plain_lyrics: Option<String>,
-}
-
-/// LRCLIB-based lyrics provider — the **preferred** multi-result source.
+/// OpenAPI 52VMY lyrics provider (https://openapi.52vmy.cn).
 ///
-/// Uses the open [LRCLIB](https://lrclib.net) lyrics database:
-///
-/// - **Search** (`GET /api/search?q={keyword}`) returns a JSON array of
-///   matching tracks (up to ~20 results). Each item includes `syncedLyrics`
-///   (LRC format) and `plainLyrics`, so `fetch_lrc` can serve from the
-///   search cache without a second round-trip.
-/// - **Single** (`GET /api/get/{id}`) can be used as a cold-cache fallback,
-///   though it is usually unnecessary because the search response already
-///   contains the full lyrics.
-///
-/// No authentication is required for the public instance.
-pub struct LrclibProvider {
+/// Two-step API flow:
+/// 1. `GET /api/music/kg/lrc?token={token}&word={keyword}` (no `n`)
+///    → returns a list of available lyrics versions (as JSON array or text).
+/// 2. `GET /api/music/kg/lrc?token={token}&word={keyword}&n={index}`
+///    → returns the LRC text for the selected version.
+pub struct OpenApiProvider {
     client: reqwest::Client,
-    base_url: String,
-    /// Cache: "lrclib:{id}" -> raw LRC text.
-    cache: Mutex<HashMap<String, String>>,
 }
 
-impl LrclibProvider {
-    pub fn new(base_url: String) -> Self {
+impl OpenApiProvider {
+    pub fn new() -> Self {
         let client = reqwest::Client::builder()
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .timeout(std::time::Duration::from_secs(10))
             .build()
             .unwrap_or_default();
-        Self {
-            client,
-            base_url,
-            cache: Mutex::new(HashMap::new()),
-        }
+        Self { client }
     }
 
-    fn search_url(&self) -> String {
-        format!("{}/api/search", self.base_url)
-    }
-
-    fn get_url(&self) -> String {
-        format!("{}/api/get", self.base_url)
-    }
-
-    fn composite_key(id: u64) -> String {
-        format!("lrclib:{}", id)
-    }
-
-    fn parse_id_from_key(key: &str) -> Option<u64> {
-        key.strip_prefix("lrclib:")?.parse().ok()
-    }
-
-    /// Pick the best LRC text: prefer `synced_lyrics`, fall back to `plain_lyrics`.
-    fn pick_lrc(item: &LrclibSearchItem) -> Option<String> {
-        item.synced_lyrics
-            .clone()
-            .or_else(|| item.plain_lyrics.clone())
-    }
-}
-
-#[async_trait::async_trait]
-impl LyricsProvider for LrclibProvider {
-    fn name(&self) -> &str {
-        &self.base_url
-    }
-
-    async fn search(&self, keyword: &str) -> anyhow::Result<Vec<LyricSearchResult>> {
-        let resp = self
-            .client
-            .get(self.search_url())
-            .query(&[("q", keyword)])
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            tracing::warn!(
-                "LRCLIB search returned HTTP {} for keyword {:?}",
-                resp.status(),
-                keyword
-            );
-            return Ok(Vec::new());
-        }
-
-        let items: Vec<LrclibSearchItem> = match resp.json().await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!("LRCLIB search JSON parse error: {}", e);
-                return Ok(Vec::new());
-            }
-        };
-
-        if items.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut results = Vec::with_capacity(items.len());
-        let mut cache = self.cache.lock();
-        for item in items {
-            let lrc_text = match Self::pick_lrc(&item) {
-                Some(t) => t,
-                None => continue, // skip entries without any lyrics
-            };
-            let key = Self::composite_key(item.id);
-            let title = if item.track_name.is_empty() { keyword.to_string() } else { item.track_name.clone() };
-            let artist = item.artist_name.clone();
-            let album = item.album_name.clone().filter(|a| !a.is_empty() && !a.starts_with("Optional("));
-            let duration_ms = item.duration.map(|s| (s * 1000.0) as u64);
-
-            cache.insert(key.clone(), lrc_text);
-            results.push(LyricSearchResult {
-                id: key,
-                title,
-                artist,
-                album,
-                duration_ms,
-                source: self.base_url.clone(),
-            });
-        }
-
-        Ok(results)
-    }
-
-    async fn fetch_lrc(&self, composite_key: &str) -> anyhow::Result<Option<LrcFile>> {
-        // 1) Hot path: serve from the search cache.
-        if let Some(text) = self.cache.lock().get(composite_key).cloned() {
-            return Ok(Some(crate::lyrics::parser::parse_lrc(&text)));
-        }
-
-        // 2) Cold path: re-fetch by id from /api/get/{id}.
-        let id = match Self::parse_id_from_key(composite_key) {
-            Some(v) => v,
-            None => return Err(anyhow::anyhow!("Invalid LRCLIB lyrics key: {}", composite_key)),
-        };
-
-        let resp = self
-            .client
-            .get(format!("{}/{}", self.get_url(), id))
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            return Ok(None);
-        }
-        let item: LrclibSearchItem = match resp.json().await {
-            Ok(v) => v,
-            Err(_) => return Ok(None),
-        };
-        let text = match Self::pick_lrc(&item) {
-            Some(t) => t,
-            None => return Ok(None),
-        };
-        Ok(Some(crate::lyrics::parser::parse_lrc(&text)))
-    }
-}
-
-// 52VMY Provider (free lyrics API, e.g. https://api.52vmy.cn)
-
-/// JSON response from the 52VMY `/api/music/lrc` endpoint (`type=json`).
-#[derive(Debug, Clone, Deserialize)]
-struct VmyLrcResponse {
-    code: i32,
-    data: Option<Vec<String>>,
-}
-
-/// 52VMY-based lyrics provider — free music lyrics API.
-///
-/// Uses the [维梦API](https://api.52vmy.cn/doc/music/lrc.html):
-///
-/// - **Search** (`GET /api/music/lrc?msg={keyword}&n={index}&type=json`):
-///   returns `{"code":200, "data":["歌名 - 歌手","词:...","曲:...","歌词行1",...]}`.
-///   The `n` parameter selects which result version to return (1,2,3…).
-///   The provider issues concurrent requests for n=1,2,3 to surface multiple
-///   versions (e.g. original artist vs. cover) in one search call.
-/// - **Fetch** (`GET /api/music/lrc?msg={keyword}&n={index}`, default TEXT):
-///   returns standard LRC text (with `[mm:ss.xx]` timestamps) that can be
-///   parsed into an `LrcFile` directly.
-///
-/// QPS limit: 4 requests per 2 seconds (burst-friendly within that window).
-pub struct FiftyTwoVmyProvider {
-    client: reqwest::Client,
-    base_url: String,
-}
-
-impl FiftyTwoVmyProvider {
-    pub fn new(base_url: String) -> Self {
-        let client = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .build()
-            .unwrap_or_default();
-        Self { client, base_url }
-    }
-
-    fn lrc_url(&self) -> String {
-        format!("{}/api/music/lrc", self.base_url)
+    fn lrc_url() -> String {
+        format!("{}/api/music/kg/lrc", OPENAPI_BASE_URL)
     }
 
     fn composite_key(n: u32, keyword: &str) -> String {
-        format!("52vmy:{}:{}", n, keyword)
+        format!("openapi:{}:{}", n, keyword)
     }
 
-    fn parse_key(key: &str) -> Option<(u32, String)> {
-        let rest = key.strip_prefix("52vmy:")?;
+    fn parse_key(composite_key: &str) -> Option<(u32, String)> {
+        let rest = composite_key.strip_prefix("openapi:")?;
         let colon = rest.find(':')?;
         let n: u32 = rest[..colon].parse().ok()?;
         let keyword = rest[colon + 1..].to_string();
         Some((n, keyword))
     }
 
-    /// Parse `"歌名 - 歌手"` from `data[0]` into `(title, artist)`.
-    fn parse_title_artist(data: &[String]) -> (String, String) {
-        let first = data.first().map(|s| s.as_str()).unwrap_or("");
-        if let Some(pos) = first.find(" - ") {
-            (first[pos + 3..].trim().to_string(), first[..pos].trim().to_string())
+    /// Parse `"artist - title"` from a text line.
+    fn parse_title_artist(line: &str) -> (String, String) {
+        if let Some(pos) = line.find(" - ") {
+            (line[pos + 3..].trim().to_string(), line[..pos].trim().to_string())
         } else {
-            (first.to_string(), String::new())
+            (line.to_string(), String::new())
         }
+    }
+
+    /// Check if the response body looks like an error from the API.
+    fn check_api_error(body: &str) -> Result<(), &str> {
+        let trimmed = body.trim();
+        if trimmed.is_empty() {
+            return Err("服务器返回空响应");
+        }
+        if trimmed.contains("110") {
+            return Err("缺少认证Token");
+        }
+        if trimmed.contains("120") {
+            return Err("无效的认证Token，请检查Token是否正确");
+        }
+        if trimmed.contains("160") {
+            return Err("API点数不足，请充值");
+        }
+        if trimmed.contains("300") {
+            return Err("请求IP不在Token白名单内");
+        }
+        if trimmed.contains("400") {
+            return Err("接口维护中，请稍后重试");
+        }
+        Ok(())
+    }
+
+    /// Parse the list response (without `n`) into individual search results.
+    ///
+    /// The response may be:
+    /// - JSON array: `["歌手A - 歌名", "歌手B - 歌名", ...]`
+    /// - JSON object with a `data` array
+    /// - Plain text with one entry per line
+    fn parse_list_response(body: &str, keyword: &str) -> Vec<LyricSearchResult> {
+        let trimmed = body.trim();
+
+        // Try JSON array: ["歌手A - 歌名", "歌手B - 歌名"]
+        if let Ok(arr) = serde_json::from_str::<Vec<String>>(trimmed) {
+            if arr.is_empty() {
+                return Vec::new();
+            }
+            return arr.into_iter().enumerate().map(|(i, line)| {
+                let n = (i + 1) as u32;
+                let (title, artist) = Self::parse_title_artist(&line);
+                LyricSearchResult {
+                    id: Self::composite_key(n, keyword),
+                    title: if title.is_empty() { line.clone() } else { title },
+                    artist,
+                    album: None,
+                    duration_ms: None,
+                    source: OPENAPI_BASE_URL.to_string(),
+                }
+            }).collect();
+        }
+
+        // Try JSON object with `data` array: {"code":200, "data":["..."]}
+        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if let Some(data) = obj.get("data").and_then(|v| v.as_array()) {
+                return data.iter().enumerate().filter_map(|(i, v)| {
+                    let line = v.as_str()?;
+                    let n = (i + 1) as u32;
+                    let (title, artist) = Self::parse_title_artist(line);
+                    Some(LyricSearchResult {
+                        id: Self::composite_key(n, keyword),
+                        title: if title.is_empty() { line.to_string() } else { title },
+                        artist,
+                        album: None,
+                        duration_ms: None,
+                        source: OPENAPI_BASE_URL.to_string(),
+                    })
+                }).collect();
+            }
+        }
+
+        // Fallback: treat as plain text, one entry per line
+        trimmed.lines()
+            .filter(|l| !l.trim().is_empty())
+            .enumerate()
+            .map(|(i, line)| {
+                let n = (i + 1) as u32;
+                let (title, artist) = Self::parse_title_artist(line.trim());
+                LyricSearchResult {
+                    id: Self::composite_key(n, keyword),
+                    title: if title.is_empty() { line.trim().to_string() } else { title },
+                    artist,
+                    album: None,
+                    duration_ms: None,
+                    source: OPENAPI_BASE_URL.to_string(),
+                }
+            })
+            .collect()
     }
 }
 
 #[async_trait::async_trait]
-impl LyricsProvider for FiftyTwoVmyProvider {
+impl LyricsProvider for OpenApiProvider {
     fn name(&self) -> &str {
-        &self.base_url
+        OPENAPI_BASE_URL
     }
 
-    /// Search by issuing concurrent requests for n=1,2,3 (3 requests stay
-    /// within the 4-per-2s QPS limit). Each response may represent a
-    /// different version of the matched song.
-    async fn search(&self, keyword: &str) -> anyhow::Result<Vec<LyricSearchResult>> {
-        // Issue 3 concurrent requests for different result versions.
-        let (res1, res2, res3) = tokio::join!(
-            self.client
-                .get(self.lrc_url())
-                .query(&[("msg", keyword), ("n", "1"), ("type", "json")])
-                .send(),
-            self.client
-                .get(self.lrc_url())
-                .query(&[("msg", keyword), ("n", "2"), ("type", "json")])
-                .send(),
-            self.client
-                .get(self.lrc_url())
-                .query(&[("msg", keyword), ("n", "3"), ("type", "json")])
-                .send(),
-        );
+    /// Search: call API without `n` to get the list of available versions.
+    async fn search(&self, keyword: &str, token: &str) -> anyhow::Result<Vec<LyricSearchResult>> {
+        let resp = self
+            .client
+            .get(Self::lrc_url())
+            .query(&[("token", token), ("word", keyword)])
+            .send()
+            .await?;
 
-        let mut results = Vec::new();
+        if !resp.status().is_success() {
+            return Ok(Vec::new());
+        }
+        let body = resp.text().await?;
 
-        for (n, resp_result) in [(1u32, res1), (2u32, res2), (3u32, res3)] {
-            let resp = match resp_result {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::debug!("52VMY n={} request error: {}", n, e);
-                    continue;
-                }
-            };
-            if !resp.status().is_success() {
-                tracing::debug!("52VMY n={} HTTP {}", n, resp.status());
-                continue;
-            }
-            let body: VmyLrcResponse = match resp.json().await {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::debug!("52VMY n={} JSON error: {}", n, e);
-                    continue;
-                }
-            };
-            if body.code != 200 {
-                continue;
-            }
-            let data = match body.data {
-                Some(ref d) if !d.is_empty() => d,
-                _ => continue,
-            };
-            let (title, artist) = Self::parse_title_artist(data);
-            let key = Self::composite_key(n, keyword);
-            results.push(LyricSearchResult {
-                id: key,
-                title,
-                artist,
-                album: None,
-                duration_ms: None,
-                source: self.base_url.clone(),
-            });
+        if let Err(err) = Self::check_api_error(&body) {
+            return Err(anyhow::anyhow!("{}", err));
         }
 
-        Ok(results)
+        Ok(Self::parse_list_response(&body, keyword))
     }
 
-    /// Fetch LRC text using the default TEXT mode (no `type=json`), which
-    /// returns standard `[mm:ss.xx]` LRC format.
-    async fn fetch_lrc(&self, composite_key: &str) -> anyhow::Result<Option<LrcFile>> {
+    /// Fetch: call API with specific `n` to get the LRC text.
+    async fn fetch_lrc(&self, composite_key: &str, token: &str) -> anyhow::Result<Option<LrcFile>> {
         let (n, keyword) = match Self::parse_key(composite_key) {
             Some(v) => v,
-            None => return Err(anyhow::anyhow!("Invalid 52VMY lyrics key: {}", composite_key)),
+            None => return Err(anyhow::anyhow!("Invalid lyrics key: {}", composite_key)),
         };
 
         let resp = self
             .client
-            .get(self.lrc_url())
-            .query(&[("msg", &*keyword), ("n", &*n.to_string())])
+            .get(Self::lrc_url())
+            .query(&[("token", token), ("word", &*keyword), ("n", &*n.to_string())])
             .send()
             .await?;
 
@@ -471,10 +305,16 @@ impl LyricsProvider for FiftyTwoVmyProvider {
             return Ok(None);
         }
         let text = resp.text().await?;
-        if text.is_empty() || text.contains("<html") {
+
+        if let Err(err) = Self::check_api_error(&text) {
+            return Err(anyhow::anyhow!("{}", err));
+        }
+
+        let lrc = crate::lyrics::parser::parse_lrc(&text);
+        if lrc.lines.is_empty() {
             return Ok(None);
         }
-        Ok(Some(crate::lyrics::parser::parse_lrc(&text)))
+        Ok(Some(lrc))
     }
 }
 
@@ -482,127 +322,122 @@ impl LyricsProvider for FiftyTwoVmyProvider {
 mod provider_tests {
     use super::*;
 
-    // – LrclibProvider tests –
+    // – OpenApiProvider key roundtrip –
 
     #[test]
-    fn lrclib_composite_key_roundtrip() {
-        let key = LrclibProvider::composite_key(17788);
-        let id = LrclibProvider::parse_id_from_key(&key).unwrap();
-        assert_eq!(id, 17788);
-    }
-
-    #[test]
-    fn lrclib_parse_id_rejects_foreign_format() {
-        assert!(LrclibProvider::parse_id_from_key("52vmy:1:test").is_none());
-        assert!(LrclibProvider::parse_id_from_key("garbage").is_none());
-    }
-
-    #[test]
-    fn lrclib_pick_lrc_prefers_synced() {
-        let item = LrclibSearchItem {
-            id: 1, track_name: "test".into(), artist_name: "test".into(),
-            album_name: None, duration: None, instrumental: false,
-            synced_lyrics: Some("[00:01.00]synced".into()),
-            plain_lyrics: Some("plain".into()),
-        };
-        assert_eq!(LrclibProvider::pick_lrc(&item).unwrap(), "[00:01.00]synced");
-    }
-
-    #[test]
-    fn lrclib_pick_lrc_falls_back_to_plain() {
-        let item = LrclibSearchItem {
-            id: 2, track_name: "test".into(), artist_name: "test".into(),
-            album_name: None, duration: None, instrumental: false,
-            synced_lyrics: None, plain_lyrics: Some("plain text".into()),
-        };
-        assert_eq!(LrclibProvider::pick_lrc(&item).unwrap(), "plain text");
-    }
-
-    #[test]
-    fn lrclib_deserialize_search_response() {
-        let json = r#"[
-            {"id":1,"trackName":"晴天","artistName":"周杰伦","albumName":"叶惠美","duration":270,"instrumental":false,"syncedLyrics":"[00:01.00]晴天","plainLyrics":"晴天\n"}
-        ]"#;
-        let items: Vec<LrclibSearchItem> = serde_json::from_str(json).unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].track_name, "晴天");
-        assert_eq!(items[0].album_name, Some("叶惠美".into()));
-        assert_eq!(items[0].duration, Some(270.0));
-    }
-
-    // – FiftyTwoVmyProvider tests –
-
-    #[test]
-    fn vmy_composite_key_roundtrip() {
-        let key = FiftyTwoVmyProvider::composite_key(2, "晴天");
-        let (n, kw) = FiftyTwoVmyProvider::parse_key(&key).unwrap();
+    fn openapi_composite_key_roundtrip() {
+        let key = OpenApiProvider::composite_key(2, "晴天");
+        let (n, kw) = OpenApiProvider::parse_key(&key).unwrap();
         assert_eq!(n, 2);
         assert_eq!(kw, "晴天");
     }
 
     #[test]
-    fn vmy_parse_key_rejects_foreign_format() {
-        assert!(FiftyTwoVmyProvider::parse_key("lrclib:123").is_none());
-        assert!(FiftyTwoVmyProvider::parse_key("garbage").is_none());
+    fn openapi_parse_key_rejects_foreign_format() {
+        assert!(OpenApiProvider::parse_key("lrclib:123").is_none());
+        assert!(OpenApiProvider::parse_key("garbage").is_none());
     }
 
+    // – Title/Artist parsing from list entry line –
+
     #[test]
-    fn vmy_parse_title_artist_with_dash() {
-        let data = vec!["周杰伦 - 晴天".into()];
-        let (title, artist) = FiftyTwoVmyProvider::parse_title_artist(&data);
+    fn parse_title_artist_with_dash() {
+        let (title, artist) = OpenApiProvider::parse_title_artist("周杰伦 - 晴天");
         assert_eq!(title, "晴天");
         assert_eq!(artist, "周杰伦");
     }
 
     #[test]
-    fn vmy_parse_title_artist_no_dash() {
-        let data = vec!["晴天".into()];
-        let (title, artist) = FiftyTwoVmyProvider::parse_title_artist(&data);
+    fn parse_title_artist_no_dash() {
+        let (title, artist) = OpenApiProvider::parse_title_artist("晴天");
         assert_eq!(title, "晴天");
         assert_eq!(artist, "");
     }
 
+    // – List response parsing –
+
     #[test]
-    fn vmy_deserialize_response() {
-        let json = r#"{"code":200,"msg":"成功","data":["周杰伦 - 晴天","词：周杰伦","line1","line2"]}"#;
-        let resp: VmyLrcResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(resp.code, 200);
-        let data = resp.data.unwrap();
-        assert_eq!(data[0], "周杰伦 - 晴天");
-        assert_eq!(data[2], "line1");
+    fn parse_list_json_array() {
+        let body = r#"["周杰伦 - 晴天", "刘瑞琦 - 晴天"]"#;
+        let results = OpenApiProvider::parse_list_response(body, "晴天");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].title, "晴天");
+        assert_eq!(results[0].artist, "周杰伦");
+        assert_eq!(results[0].id, "openapi:1:晴天");
+        assert_eq!(results[1].title, "晴天");
+        assert_eq!(results[1].artist, "刘瑞琦");
+        assert_eq!(results[1].id, "openapi:2:晴天");
+    }
+
+    #[test]
+    fn parse_list_json_object_with_data() {
+        let body = r#"{"code":200,"data":["周杰伦 - 晴天","刘瑞琦 - 晴天"]}"#;
+        let results = OpenApiProvider::parse_list_response(body, "晴天");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].artist, "周杰伦");
+        assert_eq!(results[1].artist, "刘瑞琦");
+    }
+
+    #[test]
+    fn parse_list_plain_text() {
+        let body = "周杰伦 - 晴天\n刘瑞琦 - 晴天\n";
+        let results = OpenApiProvider::parse_list_response(body, "晴天");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].artist, "周杰伦");
+        assert_eq!(results[1].artist, "刘瑞琦");
+    }
+
+    #[test]
+    fn parse_list_empty_array() {
+        let results = OpenApiProvider::parse_list_response("[]", "晴天");
+        assert!(results.is_empty());
+    }
+
+    // – API error detection –
+
+    #[test]
+    fn check_api_error_ok() {
+        assert!(OpenApiProvider::check_api_error("normal text").is_ok());
+    }
+
+    #[test]
+    fn check_api_error_empty() {
+        assert!(OpenApiProvider::check_api_error("").is_err());
+    }
+
+    #[test]
+    fn check_api_error_missing_token() {
+        let err = OpenApiProvider::check_api_error("code:110").unwrap_err();
+        assert!(err.contains("缺少"));
+    }
+
+    #[test]
+    fn check_api_error_invalid_token() {
+        let err = OpenApiProvider::check_api_error("code:120").unwrap_err();
+        assert!(err.contains("无效"));
     }
 
     // – Registry tests –
 
     #[test]
-    fn registry_with_defaults_has_lrclib_and_52vmy() {
+    fn registry_with_defaults_has_provider() {
         let reg = LyricsProviderRegistry::with_defaults();
-        let servers = reg.get_servers();
-        assert_eq!(servers.len(), 2);
-        assert_eq!(servers[0], DEFAULT_LRCLIB_URL);
-        assert_eq!(servers[1], DEFAULT_52VMY_URL);
+        assert!(!reg.has_token());
     }
 
     #[test]
-    fn registry_set_servers_all_52vmy() {
-        let mut reg = LyricsProviderRegistry::new();
-        reg.set_servers(vec![
-            "https://api.52vmy.cn".to_string(),
-            "https://my-proxy.example.com".to_string(),
-            "  ".to_string(),
-            "https://api.52vmy.cn".to_string(),
-        ]);
-        let servers = reg.get_servers();
-        assert_eq!(servers.len(), 2);
-        assert_eq!(servers[0], "https://api.52vmy.cn");
-        assert_eq!(servers[1], "https://my-proxy.example.com");
+    fn registry_set_token() {
+        let mut reg = LyricsProviderRegistry::with_defaults();
+        reg.set_token("abc123".into());
+        assert!(reg.has_token());
+        assert_eq!(reg.get_token(), Some("abc123"));
     }
 
     #[test]
-    fn registry_set_servers_empty_falls_back_to_default() {
-        let mut reg = LyricsProviderRegistry::new();
-        reg.set_servers(vec!["   ".to_string()]);
-        let servers = reg.get_servers();
-        assert_eq!(servers, vec![DEFAULT_52VMY_URL]);
+    fn registry_clear_token() {
+        let mut reg = LyricsProviderRegistry::with_defaults();
+        reg.set_token("abc123".into());
+        reg.set_token("".into());
+        assert!(!reg.has_token());
     }
 }

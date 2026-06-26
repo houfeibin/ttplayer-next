@@ -27,14 +27,17 @@ export default function LyricsPanel() {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [onlineResults, setOnlineResults] = useState<LyricSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [lyricsError, setLyricsError] = useState('');
 
   const { toggleDesktopLyrics, desktopLyricsActive } = useDesktopLyrics();
   const { handleSearch, handleLoadOnline } = useOnlineLyricsSearch(
     currentTitle, currentArtist,
     () => { setShowSearch(false); setOnlineResults([]); },
+    (msg: string) => { setLyricsError(msg); },
   );
 
   const onSearch = useCallback(async () => {
+    setLyricsError('');
     setIsSearching(true);
     try {
       setOnlineResults(await handleSearch(searchKeyword));
@@ -106,7 +109,10 @@ export default function LyricsPanel() {
           </button>
         </div>
         <div className={styles.searchResults}>
-          {onlineResults.length === 0 && !isSearching && (
+          {lyricsError && (
+            <div className={styles.emptyHint} style={{ color: '#f87171' }}>{lyricsError}</div>
+          )}
+          {onlineResults.length === 0 && !isSearching && !lyricsError && (
             <div className={styles.emptyHint}>输入关键词搜索在线歌词</div>
           )}
           {onlineResults.map((r) => (

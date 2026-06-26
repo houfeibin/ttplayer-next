@@ -16,15 +16,22 @@ export function useOnlineLyricsSearch(
   currentTitle: string,
   currentArtist: string,
   onLoaded: (lines: LrcLine[]) => void,
+  onError: (msg: string) => void,
 ) {
-  const { setLines, setHasLyrics } = useLyricsStore();
+  const { setLines } = useLyricsStore();
   const currentFile = usePlayerStore((s) => s.currentFile);
 
   const handleSearch = useCallback(async (keyword: string) => {
     const kw = keyword.trim() || `${currentTitle || ''} ${currentArtist || ''}`.trim();
     if (!kw) return [];
-    return await lyricsSearchOnline(kw).catch(() => [] as LyricSearchResult[]);
-  }, [currentTitle, currentArtist]);
+    try {
+      return await lyricsSearchOnline(kw);
+    } catch (e: any) {
+      const msg = typeof e === 'string' ? e : (e?.message ?? '搜索失败');
+      onError(msg);
+      return [] as LyricSearchResult[];
+    }
+  }, [currentTitle, currentArtist, onError]);
 
   const handleLoadOnline = useCallback(async (result: LyricSearchResult) => {
     try {
@@ -33,7 +40,6 @@ export function useOnlineLyricsSearch(
 
       const loadedLines = await lyricsGetLines();
       setLines(loadedLines);
-      setHasLyrics(true);
       onLoaded(loadedLines);
 
       // Persist to local file so next auto-load picks it up immediately.
@@ -43,11 +49,12 @@ export function useOnlineLyricsSearch(
           .catch(() => {}); // best-effort, ignore save errors
       }
       return true;
-    } catch (e) {
-      console.error('[Lyrics] Load online failed:', e);
+    } catch (e: any) {
+      const msg = typeof e === 'string' ? e : (e?.message ?? '加载失败');
+      onError(msg);
       return false;
     }
-  }, [setLines, setHasLyrics, onLoaded, currentFile]);
+  }, [setLines, onLoaded, onError, currentFile]);
 
   return { handleSearch, handleLoadOnline };
 }

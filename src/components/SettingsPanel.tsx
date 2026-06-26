@@ -6,7 +6,7 @@ import { applySkin } from '@/components/SkinProvider';
 import {
   crossfadeGetDuration, crossfadeSetDuration,
   setVolume as ipcSetVolume,
-  lyricsGetServers, lyricsSetServers,
+  lyricsGetToken, lyricsSetToken, lyricsHasToken,
   themeGetMode, themeSetMode,
   desktopLyricsGet, desktopLyricsSet, desktopLyricsReset,
   DESKTOP_LYRICS_FONT_MIN, DESKTOP_LYRICS_FONT_MAX,
@@ -49,10 +49,12 @@ export default function SettingsPanel({ onClose }: Props) {
   const [themeMode, setThemeMode] = useState('dark');
   const [activeTab, setActiveTab] = useState<'audio' | 'lyrics' | 'skin' | 'about'>('audio');
 
-  // Lyrics servers state
-  const [servers, setServers] = useState<string[]>([]);
-  const [newServerUrl, setNewServerUrl] = useState('');
-  const [serversSaving, setServersSaving] = useState(false);
+  // Lyrics API token state
+  const [apiToken, setApiToken] = useState('');
+  const [apiTokenMasked, setApiTokenMasked] = useState('');
+  const [tokenSaving, setTokenSaving] = useState(false);
+  const [tokenError, setTokenError] = useState('');
+  const [tokenSuccess, setTokenSuccess] = useState('');
 
   // Desktop lyrics settings state (font family / size / style / color / lock)
   const [desktopSettings, setDesktopSettings] = useState<DesktopLyricsSettings>({
@@ -65,7 +67,14 @@ export default function SettingsPanel({ onClose }: Props) {
   }, []);
 
   useEffect(() => {
-    lyricsGetServers().then(setServers).catch(e => logWarn('lyricsGetServers', e));
+    lyricsGetToken().then((token) => {
+      if (token) {
+        setApiToken(token);
+        setApiTokenMasked(token.length > 8
+          ? `${token.slice(0, 4)}****${token.slice(-4)}`
+          : '****');
+      }
+    }).catch(e => logWarn('lyricsGetToken', e));
   }, []);
 
   useEffect(() => {
@@ -115,41 +124,43 @@ export default function SettingsPanel({ onClose }: Props) {
     await applySkin(skinId);
   };
 
-  // --- Lyrics servers ---
-  const persistServers = async (next: string[]) => {
-    setServers(next);
-    setServersSaving(true);
-    try {
-      const result = await lyricsSetServers(next);
-      setServers(result);
-    } catch (e) {
-      logWarn('lyricsSetServers', e);
-    } finally {
-      setServersSaving(false);
-    }
-  };
-
-  const handleAddServer = () => {
-    const url = newServerUrl.trim();
-    if (!url) return;
-    if (servers.includes(url)) {
-      setNewServerUrl('');
+  // --- Lyrics API token ---
+  const handleSaveToken = async () => {
+    setTokenError('');
+    setTokenSuccess('');
+    const trimmed = apiToken.trim();
+    if (!trimmed) {
+      setTokenError('Token 不能为空');
       return;
     }
-    persistServers([...servers, url]);
-    setNewServerUrl('');
+    setTokenSaving(true);
+    try {
+      await lyricsSetToken(trimmed);
+      setApiToken(trimmed);
+      setApiTokenMasked(trimmed.length > 8
+        ? `${trimmed.slice(0, 4)}****${trimmed.slice(-4)}`
+        : '****');
+      setTokenSuccess('Token 已保存并生效');
+      setTimeout(() => setTokenSuccess(''), 3000);
+    } catch (e: any) {
+      setTokenError(typeof e === 'string' ? e : (e?.message ?? '保存失败'));
+    } finally {
+      setTokenSaving(false);
+    }
   };
 
-  const handleRemoveServer = (url: string) => {
-    persistServers(servers.filter((s) => s !== url));
-  };
-
-  const handleMoveServer = (index: number, dir: -1 | 1) => {
-    const target = index + dir;
-    if (target < 0 || target >= servers.length) return;
-    const next = [...servers];
-    [next[index], next[target]] = [next[target], next[index]];
-    persistServers(next);
+  const handleClearToken = async () => {
+    setTokenError('');
+    setTokenSuccess('');
+    try {
+      await lyricsSetToken('');
+      setApiToken('');
+      setApiTokenMasked('');
+      setTokenSuccess('Token 已清除');
+      setTimeout(() => setTokenSuccess(''), 3000);
+    } catch (e: any) {
+      setTokenError(typeof e === 'string' ? e : (e?.message ?? '清除失败'));
+    }
   };
 
   return (
@@ -214,55 +225,66 @@ export default function SettingsPanel({ onClose }: Props) {
           {activeTab === 'lyrics' && (
             <div className={styles.section}>
               <div className={styles.row}>
-                <label className={styles.label}>在线歌词服务</label>
+                <label className={styles.label}>API Token</label>
                 <span className={styles.muted}>
-                  按优先级顺序查询，首个有结果的服务胜出（故障自动切换）。支持 TTPlayer 协议的服务地址。
+                  前往 <a href="https://openapi.52vmy.cn" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>openapi.52vmy.cn</a> 注册获取 Token，用于在线歌词搜索。
                 </span>
               </div>
-              <div className={styles.serverList}>
-                {servers.map((url, i) => (
-                  <div key={url} className={styles.serverItem}>
-                    <span className={styles.serverIndex}>{i + 1}</span>
-                    <span className={styles.serverUrl} title={url}>{url}</span>
-                    <div className={styles.serverActions}>
-                      <button
-                        className={styles.iconBtn}
-                        onClick={() => handleMoveServer(i, -1)}
-                        disabled={i === 0}
-                        title="上移（提高优先级）"
-                      >↑</button>
-                      <button
-                        className={styles.iconBtn}
-                        onClick={() => handleMoveServer(i, 1)}
-                        disabled={i === servers.length - 1}
-                        title="下移（降低优先级）"
-                      >↓</button>
-                      <button
-                        className={styles.iconBtn}
-                        onClick={() => handleRemoveServer(url)}
-                        title="删除"
-                      >✕</button>
-                    </div>
-                  </div>
-                ))}
-                {servers.length === 0 && (
-                  <div className={styles.muted}>暂无服务，请添加</div>
-                )}
-              </div>
+
+              {apiTokenMasked && (
+                <div className={styles.row}>
+                  <label className={styles.label}>当前 Token</label>
+                  <span className={styles.muted} style={{ fontFamily: 'monospace', userSelect: 'all' }}>
+                    {apiTokenMasked}
+                  </span>
+                </div>
+              )}
+
               <div className={styles.addServerRow}>
                 <input
                   className={styles.addServerInput}
-                  value={newServerUrl}
-                  onChange={(e) => setNewServerUrl(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddServer()}
-                  placeholder="http:// 或 https:// 服务地址"
-                  disabled={serversSaving}
+                  value={apiToken}
+                  onChange={(e) => {
+                    setApiToken(e.target.value);
+                    setTokenError('');
+                    setTokenSuccess('');
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveToken()}
+                  placeholder="请输入 API Token"
+                  disabled={tokenSaving}
+                  type="password"
+                  autoComplete="off"
                 />
                 <button
                   className={styles.addServerBtn}
-                  onClick={handleAddServer}
-                  disabled={serversSaving || !newServerUrl.trim()}
-                >添加</button>
+                  onClick={handleSaveToken}
+                  disabled={tokenSaving || !apiToken.trim()}
+                >{tokenSaving ? '保存中...' : '保存'}</button>
+                {apiTokenMasked && (
+                  <button
+                    className={styles.addServerBtn}
+                    onClick={handleClearToken}
+                    style={{ background: 'rgba(255,100,100,0.2)' }}
+                    disabled={tokenSaving}
+                  >清除</button>
+                )}
+              </div>
+
+              {tokenError && (
+                <div className={styles.row}>
+                  <span style={{ color: '#f87171', fontSize: 13 }}>{tokenError}</span>
+                </div>
+              )}
+              {tokenSuccess && (
+                <div className={styles.row}>
+                  <span style={{ color: '#34d399', fontSize: 13 }}>{tokenSuccess}</span>
+                </div>
+              )}
+
+              <div className={styles.row}>
+                <span className={styles.muted}>
+                  Token 会加密保存在本地，填写后即可使用在线歌词搜索功能。Token 格式为字母、数字、下划线和连字符的组合。
+                </span>
               </div>
 
               <hr className={styles.divider} />
