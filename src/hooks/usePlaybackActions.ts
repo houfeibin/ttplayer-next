@@ -12,6 +12,8 @@ export function usePlaybackActions() {
   const durationMs = usePlayerStore((s) => s.durationMs);
   const positionMs = usePlayerStore((s) => s.positionMs);
   const storeSetVolume = usePlayerStore((s) => s.setVolume);
+  const setPosition = usePlayerStore((s) => s.setPosition);
+  const setSeekingTo = usePlayerStore((s) => s.setSeekingTo);
   const [dragFiles, setDragFiles] = useState(false);
 
   const handleOpenFile = useCallback(async () => {
@@ -44,8 +46,22 @@ export function usePlaybackActions() {
   const handleProgressClick = useCallback(async (e: React.MouseEvent<HTMLDivElement>) => {
     if (durationMs <= 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    await seek(Math.round(((e.clientX - rect.left) / rect.width) * durationMs));
-  }, [durationMs]);
+    const targetMs = Math.round(((e.clientX - rect.left) / rect.width) * durationMs);
+    // Optimistic update: immediately move the progress bar to the clicked
+    // position and arm a seek guard. The guard filters stale position
+    // updates from the backend's event-push thread (which may still report
+    // the pre-seek position for a few 50ms ticks) so the bar never snaps
+    // back to the old position before the backend confirms the seek.
+    setPosition(targetMs);
+    setSeekingTo({ target: targetMs, at: Date.now() });
+    try {
+      await seek(targetMs);
+    } catch {
+      // If the seek fails, clear the guard so normal position updates resume.
+      // The next event tick will restore the actual (unchanged) position.
+      setSeekingTo(null);
+    }
+  }, [durationMs, setPosition, setSeekingTo]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault(); setDragFiles(false);

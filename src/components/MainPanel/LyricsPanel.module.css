@@ -110,7 +110,9 @@
 /* 歌词行 */
 .line {
   font-size: var(--lyrics-font-size, 14px);
+  font-family: var(--lyrics-font-family, system-ui, sans-serif);
   line-height: var(--lyrics-line-height, 2);
+  text-align: var(--lyrics-text-align, left);
   color: var(--text-secondary, rgba(255, 255, 255, 0.45));
   transition: all 0.25s;
   padding: 0 6px;

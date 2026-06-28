@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tokio::task;
 
 use crate::codecs::CodecRegistry;
 use crate::dsp::crossfade::{crossfade_channel, CrossfadeResampler, CrossfadeSender};
@@ -105,6 +104,7 @@ impl AudioPipeline {
         cur_channels: u16,
         crossfade_rx: &SharedCrossfadeRx,
         crossfade_pending: &Arc<std::sync::atomic::AtomicBool>,
+        rt_handle: &tokio::runtime::Handle,
     ) -> bool {
         let registry = CodecRegistry::with_defaults();
         let decoder = match registry.probe(&next_path) {
@@ -145,7 +145,11 @@ impl AudioPipeline {
         let (tx, rx) = crossfade_channel();
         *crossfade_rx.lock() = Some(rx);
         let cf_path = next_path.clone();
-        task::spawn_blocking(move || {
+        // 使用 rt_handle.spawn_blocking 而非 tokio::task::spawn_blocking：
+        // 此函数在解码线程（普通 std::thread）中调用，不在 Tokio 运行时上下文中。
+        // tokio::task::spawn_blocking 会 panic "there is no reactor running"，
+        // 而 Handle::spawn_blocking 可在非 Tokio 线程中将任务提交到运行时阻塞池。
+        rt_handle.spawn_blocking(move || {
             if let Err(e) = Self::bg_crossfade_decode(cf_path, instance, tx, conv) {
                 tracing::error!("Crossfade decode error: {}", e);
             }

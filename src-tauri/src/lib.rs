@@ -62,6 +62,7 @@ pub fn run() {
                         tt_common::PlaybackState::Playing => 2,
                         tt_common::PlaybackState::Paused => 3,
                         tt_common::PlaybackState::Stopped => 4,
+                        tt_common::PlaybackState::Error => 5,
                     };
                     let pos = player.position_ms();
                     let dur = player.duration_ms();
@@ -69,6 +70,10 @@ pub fn run() {
                     let cur_file = player.current_file().map(|p| p.to_string_lossy().to_string());
                     let meta_rev = player.metadata_rev();
                     let crossfade_pending = player.crossfade_is_pending();
+                    // Include playback error details when present so the frontend
+                    // can log them and auto-skip. The error is cleared when a
+                    // new track starts (open_and_play_at calls clear_error).
+                    let playback_error = player.last_error();
 
                     // Downsample spectrum: 256 → 64 bands (4:1 grouping).
                     // Frontend Spectrum.tsx only renders 32 bars via nonlinear
@@ -139,6 +144,10 @@ pub fn run() {
                         "crossfadePending": crossfade_pending,
                         "spectrum": { "bands": spectrum_bands, "peak": spectrum_peak },
                         "lyrics": lyrics_update,
+                        // Playback error details (null when no error). Present
+                        // on every tick while the error persists so the frontend
+                        // can't miss it; cleared when a new track starts.
+                        "error": playback_error.as_ref(),
                     });
 
                     if let Err(e) = app_handle.emit("player-state-update", &payload) {
@@ -207,6 +216,7 @@ pub fn run() {
             commands::desktop_lyrics::desktop_lyrics_get,
             commands::desktop_lyrics::desktop_lyrics_set,
             commands::desktop_lyrics::desktop_lyrics_reset,
+            commands::desktop_lyrics::get_cursor_position,
             commands::file_props::file_get_properties,
             commands::convert::convert_files,
             commands::convert::convert_get_formats,

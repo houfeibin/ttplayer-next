@@ -18,6 +18,18 @@ export interface PlayerState {
   };
 }
 
+/** Playback error details emitted by the backend when decoding fails. */
+export interface PlaybackError {
+  /** Error category (snake_case): unknown_format, decoder_error, io_error, etc. */
+  kind: string;
+  /** Human-readable error message. */
+  message: string;
+  /** Path of the track that failed (null if no track was involved). */
+  trackPath: string | null;
+  /** Unix epoch timestamp (ms) when the error was recorded. */
+  timestampMs: number;
+}
+
 /** Event payload shape emitted by backend every ~50ms */
 export interface PlayerStateEvent {
   state: string;
@@ -39,6 +51,9 @@ export interface PlayerStateEvent {
     totalLines: number;
     changed: boolean;
   };
+  /** Playback error (null when no error). Persisted while the error state
+   *  is active so the frontend can log details and auto-skip. */
+  error?: PlaybackError | null;
 }
 
 export interface PlaylistItem {
@@ -382,6 +397,10 @@ export const DESKTOP_LYRICS_FONT_MAX = 48;
 export const DESKTOP_LYRICS_FONT_DEFAULT = 28;
 export const DESKTOP_LYRICS_FONT_FAMILY_DEFAULT = 'system-ui, sans-serif';
 export const DESKTOP_LYRICS_FONT_COLOR_DEFAULT = '#a78bfa';
+/** 窗口不透明度范围与默认值（与后端常量一致） */
+export const DESKTOP_LYRICS_OPACITY_MIN = 0.1;
+export const DESKTOP_LYRICS_OPACITY_MAX = 1.0;
+export const DESKTOP_LYRICS_OPACITY_DEFAULT = 1.0;
 
 export interface DesktopLyricsSettings {
   font_size: number;
@@ -390,6 +409,14 @@ export interface DesktopLyricsSettings {
   bold: boolean;
   italic: boolean;
   font_color: string;
+  /** 卡拉OK逐字播放模式 */
+  karaoke: boolean;
+  /** 显示行数：1=单行，2=双行 */
+  line_count: number;
+  /** 显示方向："horizontal" 或 "vertical" */
+  direction: string;
+  /** 窗口不透明度（0.1~1.0） */
+  opacity: number;
 }
 
 /** 读取桌面歌词设置。 */
@@ -413,6 +440,10 @@ export async function desktopLyricsSet(params: {
   bold?: boolean;
   italic?: boolean;
   font_color?: string;
+  karaoke?: boolean;
+  line_count?: number;
+  direction?: string;
+  opacity?: number;
 }): Promise<DesktopLyricsSettings> {
   return invoke('desktop_lyrics_set', {
     fontSize: params.font_size,
@@ -421,12 +452,25 @@ export async function desktopLyricsSet(params: {
     bold: params.bold,
     italic: params.italic,
     fontColor: params.font_color,
+    karaoke: params.karaoke,
+    lineCount: params.line_count,
+    direction: params.direction,
+    opacity: params.opacity,
   });
 }
 
 /** 恢复所有桌面歌词设置到默认值。 */
 export async function desktopLyricsReset(): Promise<DesktopLyricsSettings> {
   return invoke('desktop_lyrics_reset');
+}
+
+/**
+ * 获取鼠标在屏幕上的物理坐标（像素）。
+ * 用于桌面歌词锁定后轮询检测鼠标是否在右上角解锁按钮区域，
+ * 以便动态切换 `setIgnoreCursorEvents` 实现穿透 + 可交互共存。
+ */
+export async function getCursorPosition(): Promise<[number, number]> {
+  return invoke<[number, number]>('get_cursor_position');
 }
 
 // ============================================================

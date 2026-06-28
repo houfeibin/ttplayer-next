@@ -156,12 +156,20 @@ pub async fn playlist_add_folder(
 }
 
 /// Get the current play mode of the active playlist.
+///
+/// Returns the serde-serialized snake_case form (e.g. `"loop_one"`) so it
+/// matches the frontend `PlayMode` union exactly. The previous
+/// `format!("{:?}", ...).to_lowercase()` produced `"loopone"` for `LoopOne`,
+/// which mismatched the frontend's `'loop_one'` literal and broke the
+/// dropdown's selected-value binding after restart.
 #[tauri::command]
 pub async fn playlist_get_play_mode(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let playlist = state.playlist.lock();
-    Ok(format!("{:?}", playlist.active().play_mode).to_lowercase())
+    serde_json::to_string(&playlist.active().play_mode)
+        .map(|s| s.trim_matches('"').to_string())
+        .map_err(|e| e.to_string())
 }
 
 /// Set the play mode of the active playlist.

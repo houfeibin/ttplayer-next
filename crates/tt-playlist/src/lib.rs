@@ -16,6 +16,19 @@ pub struct Playlist {
     pub items: Vec<TrackInfo>,
     pub play_mode: PlayMode,
     pub current_index: usize,
+    /// Cached random pick used by the crossfade hand-off.
+    ///
+    /// When the crossfade provider calls [`peek_next_index`] in Random mode,
+    /// the chosen index is stashed here so that the subsequent [`next`] call
+    /// (triggered after the crossfade completes) consumes the *same* index
+    /// instead of rolling a fresh random number. Without this cache the two
+    /// calls would diverge: the decode thread would pre-buffer track Y while
+    /// `playNext()` would advance to a different track Z, causing the user to
+    /// hear Y's intro during the crossfade and then Z from the start.
+    ///
+    /// `#[serde(default)]` keeps old playlist files loadable.
+    #[serde(default)]
+    pub pending_random_index: Option<usize>,
 }
 
 impl Playlist {
@@ -25,12 +38,15 @@ impl Playlist {
             items: Vec::new(),
             play_mode: PlayMode::Sequential,
             current_index: 0,
+            pending_random_index: None,
         }
     }
 
     pub fn add_file(&mut self, path: &Path) {
         let info = TrackInfo::from_path(path);
         self.items.push(info);
+        // New track shifts indices; invalidate the cached random pick.
+        self.pending_random_index = None;
     }
 
     pub fn add_files(&mut self, paths: &[PathBuf]) {
@@ -45,6 +61,8 @@ impl Playlist {
             if self.current_index >= self.items.len() {
                 self.current_index = self.items.len().saturating_sub(1);
             }
+            // Indices shifted; the cached pick may now point at a different track.
+            self.pending_random_index = None;
         }
     }
 
@@ -65,6 +83,8 @@ impl Playlist {
             ci if from > ci && to <= ci => ci + 1,
             ci => ci,
         };
+        // Reorder changes index semantics; invalidate the cached random pick.
+        self.pending_random_index = None;
     }
 
     /// Recursively scan `dir` for audio files and add them (sorted by path).
@@ -91,6 +111,9 @@ impl Playlist {
     /// Set the play mode.
     pub fn set_play_mode(&mut self, mode: PlayMode) {
         self.play_mode = mode;
+        // Mode change invalidates any cached random pick (the next index is
+        // now determined by the new mode, not the old random selection).
+        self.pending_random_index = None;
     }
 
     pub fn current(&self) -> Option<&TrackInfo> {
@@ -105,7 +128,13 @@ impl Playlist {
     /// cursor. Returns `None` when there is no successor (Single/Sequential at
     /// the end). Used by crossfade to *peek* the upcoming track without
     /// disturbing the currently-playing index.
-    pub fn peek_next_index(&self) -> Option<usize> {
+    ///
+    /// For Random mode the picked index is cached into [`pending_random_index`]
+    /// so a subsequent [`next`] call consumes the *same* index. This keeps the
+    /// crossfade-decoded track aligned with the track that `playNext()` opens
+    /// after the crossfade completes. The cache is invalidated by any mutation
+    /// that shifts indices (add/remove/move/mode change).
+    pub fn peek_next_index(&mut self) -> Option<usize> {
         if self.items.is_empty() {
             return None;
         }
@@ -119,15 +148,29 @@ impl Playlist {
             }
             PlayMode::LoopOne => Some(self.current_index),
             PlayMode::Loop => Some((self.current_index + 1) % self.items.len()),
-            PlayMode::Random => Some(self.random_index_excluding_current()),
+            PlayMode::Random => {
+                // Reuse the cached pick when it is still valid (i.e., differs
+                // from the current index). If `current_index` has changed since
+                // the cache was populated — e.g. via `next()` consuming the
+                // pick, or direct assignment in tests — the cache is stale and
+                // we roll a fresh random pick.
+                let picked = match self.pending_random_index {
+                    Some(cached) if cached != self.current_index => cached,
+                    _ => self.random_index_excluding_current(),
+                };
+                self.pending_random_index = Some(picked);
+                Some(picked)
+            }
         }
     }
 
-    /// Peek the next track's path without mutating state.
-    pub fn peek_next_path(&self) -> Option<&str> {
-        self.peek_next_index()
-            .and_then(|i| self.items.get(i))
-            .map(|t| t.path.as_str())
+    /// Peek the next track's path without mutating `current_index`.
+    ///
+    /// Takes `&mut self` because Random mode caches the pick — see
+    /// [`peek_next_index`].
+    pub fn peek_next_path(&mut self) -> Option<&str> {
+        let idx = self.peek_next_index()?;
+        self.items.get(idx).map(|t| t.path.as_str())
     }
 
     /// Pick a random index different from the current one.
@@ -155,9 +198,15 @@ impl Playlist {
     }
 
     /// Move to next track, return its path. Advances `current_index`.
+    ///
+    /// For Random mode this consumes the cached pick (if any) so the advanced
+    /// track matches the one previously peeked by the crossfade provider.
     pub fn next(&mut self) -> Option<&str> {
         let new_index = self.peek_next_index()?;
         self.current_index = new_index;
+        // Consume the cache: the picked track is now current, so the next
+        // random pick must be a fresh roll.
+        self.pending_random_index = None;
         self.current_path()
     }
 
@@ -173,6 +222,7 @@ impl Playlist {
     pub fn clear(&mut self) {
         self.items.clear();
         self.current_index = 0;
+        self.pending_random_index = None;
     }
 
     pub fn len(&self) -> usize {
@@ -327,16 +377,20 @@ mod tests {
         let mut pl = make_playlist(PlayMode::Random, 10);
         pl.current_index = 3;
         // Sample many times; the very next pick must never equal current.
+        // `next()` both advances the cursor and consumes the cached pick so
+        // each iteration rolls a fresh random index.
         for _ in 0..200 {
             let next = pl.peek_next_index().unwrap();
             assert_ne!(next, pl.current_index, "random picked current index");
+            // Use next() so the cache is consumed and the next peek re-rolls.
             pl.current_index = next;
+            pl.pending_random_index = None;
         }
     }
 
     #[test]
     fn random_single_item_returns_self() {
-        let pl = make_playlist(PlayMode::Random, 1);
+        let mut pl = make_playlist(PlayMode::Random, 1);
         assert_eq!(pl.peek_next_index(), Some(0));
     }
 
@@ -374,6 +428,21 @@ mod tests {
         assert_eq!(pl.peek_next_index(), Some(1));
         pl.next();
         assert_eq!(pl.current_index, 1);
+    }
+
+    #[test]
+    fn random_peek_then_next_returns_same_index() {
+        // Regression: crossfade peeks, then next() must consume the SAME pick.
+        let mut pl = make_playlist(PlayMode::Random, 10);
+        pl.current_index = 3;
+        let peeked = pl.peek_next_index().unwrap();
+        assert_ne!(peeked, pl.current_index);
+        // next() should consume the cached pick, not roll a new one.
+        pl.next();
+        assert_eq!(pl.current_index, peeked);
+        // Cache is cleared after next(); a fresh peek rolls a new pick.
+        let peeked2 = pl.peek_next_index().unwrap();
+        assert_ne!(peeked2, pl.current_index);
     }
 
     #[test]

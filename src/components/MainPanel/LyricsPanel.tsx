@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import { useLyricsStore } from '@/stores/lyrics';
 import { usePlayerStore } from '@/stores/player';
 import { seek } from '@/utils/ipc';
@@ -7,21 +7,42 @@ import Spectrum from './Spectrum';
 import { KaraokeLine } from './KaraokeLine';
 import { useLyricsAutoLoad } from '@/hooks/useLyricsAutoLoad';
 import { useOnlineLyricsSearch } from '@/hooks/useOnlineLyricsSearch';
-import { useDesktopLyrics } from '@/hooks/useDesktopLyrics';
 import styles from './LyricsPanel.module.css';
 
-export default function LyricsPanel() {
+interface LyricsPanelProps {
+  /** 切换桌面歌词窗口开关（由 MainPanel 提升，迷你模式下保持活跃） */
+  toggleDesktopLyrics: () => Promise<void>;
+  /** 桌面歌词窗口是否开启 */
+  desktopLyricsActive: boolean;
+}
+
+export default function LyricsPanel({
+  toggleDesktopLyrics,
+  desktopLyricsActive,
+}: LyricsPanelProps) {
   const {
     currentIndex, progress, hasLyrics, offset,
     fontSize, lineHeight, activeColor, inactiveColor,
+    fontFamily, textAlign,
     addOffset,
   } = useLyricsStore();
 
   const currentTitle = usePlayerStore((s) => s.metadata.title);
   const currentArtist = usePlayerStore((s) => s.metadata.artist);
+  const currentFile = usePlayerStore((s) => s.currentFile);
 
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const linesContainerRef = useRef<HTMLDivElement>(null);
   const { lines } = useLyricsAutoLoad(lineRefs);
+
+  // 歌曲切换时重置歌词滚动位置到顶部，确保新歌词从第一句开始显示。
+  // 不依赖 currentIndex 变化（可能未变化导致 effect 不触发），
+  // 而是直接监听 currentFile 变化，立即（无动画）将 scrollTop 归零。
+  useEffect(() => {
+    if (linesContainerRef.current) {
+      linesContainerRef.current.scrollTop = 0;
+    }
+  }, [currentFile]);
 
   const [showSearch, setShowSearch] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -29,7 +50,6 @@ export default function LyricsPanel() {
   const [isSearching, setIsSearching] = useState(false);
   const [lyricsError, setLyricsError] = useState('');
 
-  const { toggleDesktopLyrics, desktopLyricsActive } = useDesktopLyrics();
   const { handleSearch, handleLoadOnline } = useOnlineLyricsSearch(
     currentTitle, currentArtist,
     () => { setShowSearch(false); setOnlineResults([]); },
@@ -65,6 +85,8 @@ export default function LyricsPanel() {
     '--lyrics-line-height': lineHeight,
     '--lyrics-active-color': activeColor,
     '--lyrics-inactive-color': inactiveColor,
+    '--lyrics-font-family': fontFamily,
+    '--lyrics-text-align': textAlign,
   } as React.CSSProperties;
 
   // --- Empty state ---
@@ -153,7 +175,7 @@ export default function LyricsPanel() {
           </button>
         </div>
       </div>
-      <div className={styles.lines}>
+      <div className={styles.lines} ref={linesContainerRef}>
         {lines.map((line: LrcLine, i: number) => {
           const isActive = i === currentIndex;
           const isPast = currentIndex !== null && i < currentIndex;

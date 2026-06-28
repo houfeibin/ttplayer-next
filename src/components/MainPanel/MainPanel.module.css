@@ -190,7 +190,48 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px;
+  /* 缩短标题显示区域，超长标题通过 marquee 滚动展示完整内容。
+     140px 约可显示 10 个汉字 / 20 个拉丁字符，超出部分由 canvas 测量
+     触发 titleScrolling 滚动动画，未滚动时以省略号收尾。 */
+  max-width: 140px;
+  position: relative;
+}
+
+/* When scrolling is active, disable ellipsis clipping so the full text
+   can scroll into view. */
+.songTitle[data-scrolling="true"] {
+  text-overflow: clip;
+}
+
+/* Inner text wrapper — inline-block so transform: translateX works.
+   When not scrolling, this is just a plain inline span. */
+.songTitleText {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* Marquee animation: the ::after pseudo-element duplicates the text via
+   attr(data-text), and padding-right creates a gap between the two copies.
+   translateX(-50%) moves exactly one copy width, creating a seamless loop.
+   Duration is set per-title via --title-scroll-duration (consistent ~50px/s
+   speed regardless of text length). */
+.songTitle[data-scrolling="true"] .songTitleText {
+  padding-right: 40px;
+  animation: title-marquee var(--title-scroll-duration, 15s) linear infinite;
+}
+
+.songTitle[data-scrolling="true"] .songTitleText::after {
+  content: attr(data-text);
+}
+
+/* Pause on hover */
+.songTitle[data-scrolling="true"]:hover .songTitleText {
+  animation-play-state: paused;
+}
+
+@keyframes title-marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
 
 .songArtist {
@@ -199,7 +240,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px;
+  /* 与 .songTitle 保持相同的最大宽度，确保两行左侧对齐、视觉一致 */
+  max-width: 140px;
 }
 
 .songBadge {

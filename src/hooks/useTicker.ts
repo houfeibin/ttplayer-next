@@ -22,7 +22,7 @@ export function useTicker() {
     const parts: string[] = [];
     if (metadata?.sampleRate) parts.push(`${metadata.sampleRate / 1000}kHz`);
     if (metadata?.bitDepth) parts.push(`${metadata.bitDepth}bit`);
-    if (metadata?.channels) parts.push(metadata.channels === 2 ? 'Stereo' : metadata.channels === 1 ? 'Mono' : `${metadata.channels}ch`);
+    if (metadata?.channels) parts.push(metadata.channels === 2 ? '立体声' : metadata.channels === 1 ? '单声道' : `${metadata.channels}声道`);
     if (metadata?.bitRate) parts.push(`${metadata.bitRate}kbps`);
     return parts.join(' · ');
   })();

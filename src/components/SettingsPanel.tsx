@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { usePlayerStore } from '@/stores/player';
 import { useSkinStore } from '@/stores/skin';
+import { useLyricsStore, type LyricsTextAlign } from '@/stores/lyrics';
 import { applySkin } from '@/components/SkinProvider';
 import {
   crossfadeGetDuration, crossfadeSetDuration,
@@ -10,6 +11,7 @@ import {
   themeGetMode, themeSetMode,
   desktopLyricsGet, desktopLyricsSet, desktopLyricsReset,
   DESKTOP_LYRICS_FONT_MIN, DESKTOP_LYRICS_FONT_MAX,
+  DESKTOP_LYRICS_OPACITY_MIN, DESKTOP_LYRICS_OPACITY_MAX, DESKTOP_LYRICS_OPACITY_DEFAULT,
   type DesktopLyricsSettings,
 } from '@/utils/ipc';
 import { logWarn } from '@/utils/logger';
@@ -39,6 +41,13 @@ const FONT_COLOR_PRESETS = [
   '#fbbf24', '#f472b6', '#ffffff', '#22d3ee',
 ];
 
+/** 主界面歌词文字对齐方式选项。 */
+const LYRICS_TEXT_ALIGN_OPTIONS: { label: string; value: LyricsTextAlign }[] = [
+  { label: '左对齐', value: 'left' },
+  { label: '居中', value: 'center' },
+  { label: '右对齐', value: 'right' },
+];
+
 export default function SettingsPanel({ onClose }: Props) {
   const volume = usePlayerStore((s) => s.volume);
   const setVolume = usePlayerStore((s) => s.setVolume);
@@ -56,11 +65,74 @@ export default function SettingsPanel({ onClose }: Props) {
   const [tokenError, setTokenError] = useState('');
   const [tokenSuccess, setTokenSuccess] = useState('');
 
-  // Desktop lyrics settings state (font family / size / style / color / lock)
+  // Desktop lyrics settings state (font family / size / style / color / lock / karaoke / display mode)
   const [desktopSettings, setDesktopSettings] = useState<DesktopLyricsSettings>({
     font_size: 28, locked: false, font_family: 'system-ui, sans-serif',
     bold: true, italic: false, font_color: '#a78bfa',
+    karaoke: true, line_count: 1, direction: 'horizontal',
+    opacity: DESKTOP_LYRICS_OPACITY_DEFAULT,
   });
+
+  // 主界面歌词样式（来自 lyrics store，持久化到 localStorage）
+  const mainLyricsFontFamily = useLyricsStore((s) => s.fontFamily);
+  const mainLyricsTextAlign = useLyricsStore((s) => s.textAlign);
+  const mainLyricsFontSize = useLyricsStore((s) => s.fontSize);
+  const mainLyricsLineHeight = useLyricsStore((s) => s.lineHeight);
+  const setMainLyricsFontFamily = useLyricsStore((s) => s.setFontFamily);
+  const setMainLyricsTextAlign = useLyricsStore((s) => s.setTextAlign);
+  const setMainLyricsFontSize = useLyricsStore((s) => s.setFontSize);
+  const setMainLyricsLineHeight = useLyricsStore((s) => s.setLineHeight);
+
+  // 系统已安装字体列表（通过浏览器 queryLocalFonts API 枚举，失败时回退到精选列表）
+  const [systemFonts, setSystemFonts] = useState<{ label: string; value: string }[]>([]);
+  const [fontsLoading, setFontsLoading] = useState(false);
+  const [fontsLoadError, setFontsLoadError] = useState('');
+
+  /**
+   * 通过浏览器 `queryLocalFonts()` API 枚举系统已安装字体。
+   * - Chrome 103+ / WebView2 支持，需要用户授权（首次调用弹出权限提示）
+   * - 失败时回退到 `FONT_FAMILY_OPTIONS` 精选列表，保证功能可用
+   * - 兼容 TrueType / OpenType 等常见字体格式（由系统字体渲染处理）
+   */
+  const loadSystemFonts = useCallback(async () => {
+    setFontsLoading(true);
+    setFontsLoadError('');
+    try {
+      const w = window as unknown as { queryLocalFonts?: () => Promise<Array<{ family: string }>> };
+      if (typeof w.queryLocalFonts !== 'function') {
+        setFontsLoadError('当前环境不支持系统字体枚举，已显示精选字体列表');
+        return;
+      }
+      const fonts = await w.queryLocalFonts();
+      // 按 family 去重，构造 CSS font-family 字符串（含 sans-serif 回退）
+      const familyMap = new Map<string, string>();
+      for (const f of fonts) {
+        if (f.family && !familyMap.has(f.family)) {
+          familyMap.set(f.family, `"${f.family}", sans-serif`);
+        }
+      }
+      const opts = Array.from(familyMap.entries())
+        .map(([family, value]) => ({ label: family, value }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans'));
+      if (opts.length > 0) {
+        setSystemFonts(opts);
+      } else {
+        setFontsLoadError('未检测到系统字体，已显示精选字体列表');
+      }
+    } catch (e: any) {
+      logWarn('queryLocalFonts', e);
+      setFontsLoadError('系统字体加载失败，已显示精选字体列表');
+    } finally {
+      setFontsLoading(false);
+    }
+  }, []);
+
+  // 首次进入歌词标签页时尝试加载系统字体（失败自动回退，不阻塞 UI）
+  useEffect(() => {
+    if (activeTab === 'lyrics' && systemFonts.length === 0 && !fontsLoading && !fontsLoadError) {
+      void loadSystemFonts();
+    }
+  }, [activeTab, systemFonts.length, fontsLoading, fontsLoadError, loadSystemFonts]);
 
   useEffect(() => {
     crossfadeGetDuration().then(ms => setCrossfadeMs(ms)).catch(e => logWarn('crossfadeGetDuration', e));
@@ -103,6 +175,11 @@ export default function SettingsPanel({ onClose }: Props) {
 
   const handleDesktopLockToggle = () => {
     void updateDesktop({ locked: !desktopSettings.locked });
+  };
+
+  const handleDesktopOpacity = (val: number) => {
+    const clamped = Math.max(DESKTOP_LYRICS_OPACITY_MIN, Math.min(DESKTOP_LYRICS_OPACITY_MAX, val));
+    void updateDesktop({ opacity: clamped });
   };
 
   const handleDesktopReset = async () => {
@@ -289,6 +366,101 @@ export default function SettingsPanel({ onClose }: Props) {
 
               <hr className={styles.divider} />
 
+              {/* ─── 主界面歌词样式 ─── */}
+              <div className={styles.row}>
+                <label className={styles.label}>主界面歌词样式</label>
+                <span className={styles.muted}>
+                  字体与对齐方式实时生效，同时应用于歌词列表整体布局与单行显示。
+                </span>
+              </div>
+
+              <div className={styles.row}>
+                <label className={styles.label}>字体</label>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <select
+                    className={styles.addServerInput}
+                    style={{ flex: '0 0 auto', width: 'auto', minWidth: 200 }}
+                    value={mainLyricsFontFamily}
+                    onChange={(e) => setMainLyricsFontFamily(e.target.value)}
+                  >
+                    {/* 当前值若不在任何列表中，仍保持可选（避免显示空白） */}
+                    {![...systemFonts, ...FONT_FAMILY_OPTIONS].some((o) => o.value === mainLyricsFontFamily) && (
+                      <option value={mainLyricsFontFamily}>{mainLyricsFontFamily}</option>
+                    )}
+                    {systemFonts.length > 0 && (
+                      <optgroup label="系统字体">
+                        {systemFonts.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <optgroup label="精选字体">
+                      {FONT_FAMILY_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </optgroup>
+                  </select>
+                  <button
+                    className={styles.addServerBtn}
+                    onClick={() => void loadSystemFonts()}
+                    disabled={fontsLoading}
+                    title="重新扫描系统已安装字体（TrueType / OpenType 等）"
+                    style={{ padding: '8px 12px', fontSize: 12 }}
+                  >{fontsLoading ? '加载中...' : '🔄 刷新'}</button>
+                </div>
+                {fontsLoadError && (
+                  <span className={styles.muted} style={{ color: '#fbbf24' }}>{fontsLoadError}</span>
+                )}
+              </div>
+
+              <div className={styles.row}>
+                <label className={styles.label}>字号</label>
+                <div className={styles.sliderRow}>
+                  <input
+                    type="range"
+                    min={10}
+                    max={32}
+                    step={1}
+                    value={mainLyricsFontSize}
+                    onChange={(e) => setMainLyricsFontSize(parseInt(e.target.value))}
+                    className={styles.slider}
+                  />
+                  <span className={styles.value}>{mainLyricsFontSize}px</span>
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <label className={styles.label}>行高</label>
+                <div className={styles.sliderRow}>
+                  <input
+                    type="range"
+                    min={1.2}
+                    max={3.0}
+                    step={0.1}
+                    value={mainLyricsLineHeight}
+                    onChange={(e) => setMainLyricsLineHeight(parseFloat(e.target.value))}
+                    className={styles.slider}
+                  />
+                  <span className={styles.value}>{mainLyricsLineHeight.toFixed(1)}</span>
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <label className={styles.label}>文字对齐</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {LYRICS_TEXT_ALIGN_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      className={`${styles.skinCard} ${mainLyricsTextAlign === opt.value ? styles.activeSkin : ''}`}
+                      onClick={() => setMainLyricsTextAlign(opt.value)}
+                      style={{ padding: '6px 12px', fontSize: 12 }}
+                    >{opt.label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <hr className={styles.divider} />
+
               <div className={styles.row}>
                 <label className={styles.label}>桌面歌词</label>
                 <span className={styles.muted}>
@@ -444,10 +616,76 @@ export default function SettingsPanel({ onClose }: Props) {
               </div>
 
               <div className={styles.row}>
+                <label className={styles.label}>窗口不透明度</label>
+                <div className={styles.sliderRow}>
+                  <input
+                    type="range"
+                    min={DESKTOP_LYRICS_OPACITY_MIN}
+                    max={DESKTOP_LYRICS_OPACITY_MAX}
+                    step={0.05}
+                    value={desktopSettings.opacity}
+                    onChange={(e) => handleDesktopOpacity(parseFloat(e.target.value))}
+                    className={styles.slider}
+                  />
+                  <span className={styles.value}>{Math.round(desktopSettings.opacity * 100)}%</span>
+                </div>
+              </div>
+
+              <hr className={styles.divider} />
+
+              <div className={styles.row}>
+                <label className={styles.label}>卡拉OK逐字</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    className={`${styles.skinCard} ${desktopSettings.karaoke ? styles.activeSkin : ''}`}
+                    onClick={() => updateDesktop({ karaoke: true })}
+                    style={{ padding: '6px 12px', fontSize: 12 }}
+                  >开启</button>
+                  <button
+                    className={`${styles.skinCard} ${!desktopSettings.karaoke ? styles.activeSkin : ''}`}
+                    onClick={() => updateDesktop({ karaoke: false })}
+                    style={{ padding: '6px 12px', fontSize: 12 }}
+                  >关闭</button>
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <label className={styles.label}>显示行数</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    className={`${styles.skinCard} ${desktopSettings.line_count === 1 ? styles.activeSkin : ''}`}
+                    onClick={() => updateDesktop({ line_count: 1 })}
+                    style={{ padding: '6px 12px', fontSize: 12 }}
+                  >单行</button>
+                  <button
+                    className={`${styles.skinCard} ${desktopSettings.line_count === 2 ? styles.activeSkin : ''}`}
+                    onClick={() => updateDesktop({ line_count: 2 })}
+                    style={{ padding: '6px 12px', fontSize: 12 }}
+                  >双行</button>
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <label className={styles.label}>显示方向</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    className={`${styles.skinCard} ${desktopSettings.direction === 'horizontal' ? styles.activeSkin : ''}`}
+                    onClick={() => updateDesktop({ direction: 'horizontal' })}
+                    style={{ padding: '6px 12px', fontSize: 12 }}
+                  >横向</button>
+                  <button
+                    className={`${styles.skinCard} ${desktopSettings.direction === 'vertical' ? styles.activeSkin : ''}`}
+                    onClick={() => updateDesktop({ direction: 'vertical' })}
+                    style={{ padding: '6px 12px', fontSize: 12 }}
+                  >竖向</button>
+                </div>
+              </div>
+
+              <div className={styles.row}>
                 <button
                   className={styles.addServerBtn}
                   onClick={handleDesktopReset}
-                  title="恢复字号/字体/样式/颜色/锁定为默认"
+                  title="恢复字号/字体/样式/颜色/锁定/卡拉OK/显示模式为默认"
                 >↺ 恢复默认</button>
               </div>
             </div>

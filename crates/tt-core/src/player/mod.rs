@@ -1,13 +1,14 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use parking_lot::Mutex;
+use tokio::task;
 
 use crate::dsp::crossfade::{CrossfadeReceiver, CROSSFADE_DURATION_MS};
 use crate::dsp::spectrum::SpectrumFrame;
 use crate::dsp::DspChain;
 use crate::output::{AtomicVolume, PlaybackRing};
-use tt_common::{PlaybackState, SongMetadata};
+use tt_common::{PlaybackError, PlaybackState, SongMetadata};
 
 mod crossfade_bridge;
 mod decode_thread;
@@ -29,6 +30,7 @@ pub(crate) fn state_to_code(s: PlaybackState) -> u8 {
         PlaybackState::Playing => 2,
         PlaybackState::Paused => 3,
         PlaybackState::Stopped => 4,
+        PlaybackState::Error => 5,
     }
 }
 pub(crate) fn code_to_state(c: u8) -> PlaybackState {
@@ -38,6 +40,7 @@ pub(crate) fn code_to_state(c: u8) -> PlaybackState {
         2 => PlaybackState::Playing,
         3 => PlaybackState::Paused,
         4 => PlaybackState::Stopped,
+        5 => PlaybackState::Error,
         _ => PlaybackState::Idle,
     }
 }
@@ -71,6 +74,11 @@ pub struct AudioPipeline {
     pub(crate) crossfade_rx: SharedCrossfadeRx,
 
     pub(crate) next_provider: Arc<Mutex<Option<Arc<dyn NextTrackProvider>>>>,
+
+    /// Last playback error (None when no error has occurred, or the error was
+    /// cleared by starting a new track). Emitted to the frontend so the UI can
+    /// log details and auto-skip to the next track.
+    pub(crate) last_error: Arc<Mutex<Option<PlaybackError>>>,
 }
 
 impl AudioPipeline {
@@ -90,6 +98,7 @@ impl AudioPipeline {
             crossfade_pending: Arc::new(AtomicBool::new(false)),
             crossfade_rx: Arc::new(Mutex::new(None)),
             next_provider: Arc::new(Mutex::new(None)),
+            last_error: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -102,6 +111,31 @@ impl AudioPipeline {
 
     pub fn state(&self) -> PlaybackState {
         code_to_state(self.state.load(Ordering::Relaxed))
+    }
+
+    /// Last recorded playback error (if any). Remains set until a new track is
+    /// opened via [`transport::open_and_play_at`], which clears it.
+    pub fn last_error(&self) -> Option<PlaybackError> {
+        self.last_error.lock().clone()
+    }
+
+    /// Record a playback error and transition the state machine to `Error`.
+    /// The error details (kind, message, track path, timestamp) are stored and
+    /// emitted to the frontend via the event-push thread so the UI can log
+    /// them and trigger an auto-skip.
+    pub fn set_error(&self, error: PlaybackError) {
+        tracing::error!(
+            "PLAYBACK ERROR: kind={:?} track={:?} msg={}",
+            error.kind, error.track_path, error.message,
+        );
+        *self.last_error.lock() = Some(error);
+        self.state.store(state_to_code(PlaybackState::Error), Ordering::Relaxed);
+    }
+
+    /// Clear any stored playback error. Called when a new track starts so the
+    /// frontend doesn't see a stale error from the previous track.
+    pub fn clear_error(&self) {
+        *self.last_error.lock() = None;
     }
     pub fn position_ms(&self) -> u64 {
         self.ring_slot.lock().as_ref().map(|r| r.position_ms()).unwrap_or(0)
@@ -129,6 +163,45 @@ impl AudioPipeline {
     /// re-emit metadata that arrived after the file-change tick.
     pub fn metadata_rev(&self) -> u64 {
         self.metadata_rev.load(Ordering::Relaxed)
+    }
+
+    /// Re-read tags from `path` and refresh the cached metadata, but only if
+    /// `path` matches the currently loaded file. Used after external tag edits
+    /// (e.g. via the TagEditor UI) so the player UI updates without a restart
+    /// or manual refresh.
+    ///
+    /// Like [`transport::open_and_play_at`], tag parsing runs on a blocking
+    /// task to avoid stalling the command thread (base64 cover-art encoding
+    /// can take ~50ms). The event-push thread detects the bumped
+    /// `metadata_rev` and re-emits the fresh metadata to the frontend on its
+    /// next tick (~50ms), so the UI reflects the changes with no perceptible
+    /// delay and zero interference with ongoing playback.
+    pub fn refresh_metadata_if_current(&self, path: &Path) {
+        let is_current = self
+            .current_file
+            .lock()
+            .as_ref()
+            .map(|p| p == path)
+            .unwrap_or(false);
+        if !is_current {
+            return;
+        }
+
+        let tags_path = path.to_path_buf();
+        let metadata_slot = self.metadata.clone();
+        let metadata_rev = self.metadata_rev.clone();
+        let dsp_chain_slot = self.dsp_chain.clone();
+        task::spawn_blocking(move || {
+            if let Ok(tags) = tt_tags::read(&tags_path) {
+                if let Some(ref rg) = tags.replay_gain {
+                    if let Some(rg_proc) = dsp_chain_slot.lock().replay_gain() {
+                        rg_proc.set_from_rg(rg);
+                    }
+                }
+                *metadata_slot.lock() = tags;
+                metadata_rev.fetch_add(1, Ordering::Relaxed);
+            }
+        });
     }
 
     /// Latest spectrum frame from the output callback (may be None if not yet analyzed)

@@ -28,6 +28,9 @@ pub enum PlaybackState {
     Playing,
     Paused,
     Stopped,
+    /// Playback failed (e.g. corrupt file, unsupported format, decode error).
+    /// The frontend observes this and auto-skips to the next track.
+    Error,
 }
 
 /// Playback modes
@@ -151,7 +154,8 @@ pub struct ReplayGainInfo {
 }
 
 /// Error kind for playback errors
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
     NoFile,
     UnknownFormat,
@@ -160,4 +164,35 @@ pub enum ErrorKind {
     SeekError,
     IoError,
     Cancelled,
+}
+
+/// A playback error with full context for logging and auto-skip decisions.
+///
+/// Stored in `AudioPipeline::last_error` and emitted to the frontend via the
+/// `player-state-update` event payload so the UI can log details and trigger
+/// an automatic skip to the next track.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaybackError {
+    pub kind: ErrorKind,
+    pub message: String,
+    /// Path of the track that failed (None if no track was involved).
+    #[serde(rename = "trackPath")]
+    pub track_path: Option<String>,
+    /// Unix epoch timestamp (ms) when the error was recorded.
+    #[serde(rename = "timestampMs")]
+    pub timestamp_ms: u64,
+}
+
+impl PlaybackError {
+    pub fn new(kind: ErrorKind, message: impl Into<String>, track_path: Option<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            track_path,
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        }
+    }
 }

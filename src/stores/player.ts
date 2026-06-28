@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import type { PlayerStateEvent } from '@/utils/ipc';
+import type { PlayerStateEvent, PlaybackError } from '@/utils/ipc';
 
 // Matches Rust PlaybackState enum
 export type PlaybackState =
@@ -8,7 +8,8 @@ export type PlaybackState =
   | 'Loading'
   | 'Playing'
   | 'Paused'
-  | 'Stopped';
+  | 'Stopped'
+  | 'Error';
 
 export type PlayMode =
   | 'Single'
@@ -34,6 +35,20 @@ export interface SongMetadata {
   coverArt: string | null;
 }
 
+/**
+ * Active seek guard. Set immediately on user-initiated seek (optimistic UI),
+ * cleared once the backend reports a position matching the target — or after
+ * a safety timeout. While active, `applyEventPayload` ignores stale position
+ * updates from the event-push thread (which may still report the pre-seek
+ * position for a few ticks before the backend finishes processing the seek).
+ * This prevents the progress bar from briefly snapping back to the old
+ * position before jumping to the clicked target.
+ */
+export interface SeekingTo {
+  target: number;
+  at: number;
+}
+
 interface PlayerStore {
   state: PlaybackState;
   positionMs: number;
@@ -45,6 +60,10 @@ interface PlayerStore {
   metadata: SongMetadata;
   spectrum: number[];      // 256 log-spaced magnitude bands 0..1
   spectrumPeak: number;
+  /** Last playback error (null when no error). Set when backend reports Error state. */
+  error: PlaybackError | null;
+  /** Seek guard (null when not seeking). See SeekingTo docs. */
+  seekingTo: SeekingTo | null;
 
   setState: (state: PlaybackState) => void;
   setPosition: (ms: number) => void;
@@ -54,6 +73,8 @@ interface PlayerStore {
   setCurrentFile: (path: string | null) => void;
   setMetadata: (meta: SongMetadata) => void;
   setSpectrum: (bands: number[], peak: number) => void;
+  /** Set/clear the seek guard. Pass null to clear. */
+  setSeekingTo: (val: SeekingTo | null) => void;
   /** Batch-apply the entire event payload from backend (replaces all per-field setters) */
   applyEventPayload: (payload: PlayerStateEvent) => void;
 }
@@ -84,6 +105,8 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   },
   spectrum: Array(256).fill(0),
   spectrumPeak: 0,
+  error: null,
+  seekingTo: null,
 
   setState: (state) => set({ state }),
   setPosition: (ms) => set({ positionMs: ms }),
@@ -93,19 +116,59 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   setCurrentFile: (path) => set({ currentFile: path }),
   setMetadata: (meta) => set({ metadata: meta }),
   setSpectrum: (bands, peak) => set({ spectrum: bands, spectrumPeak: peak }),
+  setSeekingTo: (val) => set({ seekingTo: val }),
   applyEventPayload: (p) => {
     const stateMap: Record<string, PlaybackState> = {
-      Playing: 'Playing', Paused: 'Paused', Stopped: 'Stopped', Idle: 'Idle', Loading: 'Loading',
+      Playing: 'Playing', Paused: 'Paused', Stopped: 'Stopped',
+      Idle: 'Idle', Loading: 'Loading', Error: 'Error',
     };
+    const cur = get();
+    let positionMs = p.positionMs;
+    let seekingTo = cur.seekingTo;
+
+    // If the file changed (new track started), invalidate any active seek
+    // guard so the new track's position updates aren't filtered.
+    const fileChanged = p.currentFile !== cur.currentFile;
+    if (fileChanged) {
+      seekingTo = null;
+    }
+
+    // Seek guard: filter stale position updates. The event-push thread (50ms
+    // tick) may still report the pre-seek position for a few ticks after the
+    // user clicks, because the backend hasn't finished processing the seek
+    // yet. While the guard is active, ignore positions that are far from the
+    // seek target; accept (and clear the guard) once the backend reports a
+    // position close to the target. A 1s safety timeout ensures the guard
+    // can't get stuck if the seek fails.
+    if (seekingTo !== null) {
+      const SEEK_TOLERANCE_MS = 2000;
+      const SEEK_SAFETY_TIMEOUT_MS = 1000;
+      const elapsed = Date.now() - seekingTo.at;
+      const caughtUp = Math.abs(p.positionMs - seekingTo.target) < SEEK_TOLERANCE_MS;
+      if (caughtUp || elapsed > SEEK_SAFETY_TIMEOUT_MS) {
+        seekingTo = null;
+      } else {
+        // Stale position — keep the optimistic value
+        positionMs = cur.positionMs;
+      }
+    }
+
     set({
       state: stateMap[p.state] ?? 'Idle',
-      positionMs: p.positionMs,
+      positionMs,
       durationMs: p.durationMs,
       volume: p.volume,
       currentFile: p.currentFile,
-      metadata: p.metadata ?? get().metadata,
-      spectrum: p.spectrum?.bands ?? get().spectrum,
+      // 切歌瞬间后端可能推送旧歌的 metadata（spawn_blocking 尚未完成）。
+      // fileChanged 时保留当前 metadata，等后端 metadata_changed 推送新 metadata 时再更新，
+      // 避免"显示A的标签却播放B"的错位。
+      metadata: fileChanged ? cur.metadata : (p.metadata ?? cur.metadata),
+      spectrum: p.spectrum?.bands ?? cur.spectrum,
       spectrumPeak: p.spectrum?.peak ?? 0,
+      // Mirror the backend's error field. When the backend clears the error
+      // (on new track start), p.error will be null, clearing the frontend state.
+      error: p.error ?? null,
+      seekingTo,
     });
   },
 }));

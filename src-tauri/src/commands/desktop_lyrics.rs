@@ -14,6 +14,15 @@ pub const FONT_FAMILY_DEFAULT: &str = "system-ui, sans-serif";
 /// 默认字体颜色（主题强调色，与原歌词渲染一致）
 pub const FONT_COLOR_DEFAULT: &str = "#a78bfa";
 
+/// 窗口不透明度范围与默认值（0.0 全透明，1.0 不透明）
+pub const OPACITY_MIN: f32 = 0.1;
+pub const OPACITY_MAX: f32 = 1.0;
+pub const OPACITY_DEFAULT: f32 = 1.0;
+
+/// serde 反序列化默认值：旧版配置文件缺少 `opacity` 字段时使用默认值，
+/// 避免整个配置解析失败导致所有设置被重置。
+fn default_opacity() -> f32 { OPACITY_DEFAULT }
+
 /// 桌面歌词运行时设置：字号 + 窗口位置锁定 + 字体族/样式/颜色。
 ///
 /// 通过简单的 JSON 配置文件持久化，重启后保留。设置变更时后端通过
@@ -33,6 +42,19 @@ pub struct DesktopLyricsSettings {
     pub italic: bool,
     /// 字体颜色（#RRGGBB）
     pub font_color: String,
+    /// 卡拉OK逐字播放模式（开启后逐字高亮，关闭则整行高亮）
+    pub karaoke: bool,
+    /// 显示行数：1=单行，2=双行
+    pub line_count: u32,
+    /// 显示方向："horizontal" 或 "vertical"
+    pub direction: String,
+    /// 窗口不透明度（0.1~1.0），由前端 CSS 应用到桌面歌词容器
+    #[serde(default = "default_opacity")]
+    pub opacity: f32,
+    /// 桌面歌词窗口是否开启（跨会话记忆状态）。
+    /// 用户开启/关闭桌面歌词时由前端写入，应用启动时读取以自动恢复。
+    #[serde(default)]
+    pub visible: bool,
 }
 
 impl Default for DesktopLyricsSettings {
@@ -44,6 +66,11 @@ impl Default for DesktopLyricsSettings {
             bold: true,
             italic: false,
             font_color: FONT_COLOR_DEFAULT.to_string(),
+            karaoke: true,
+            line_count: 1,
+            direction: "horizontal".to_string(),
+            opacity: OPACITY_DEFAULT,
+            visible: false,
         }
     }
 }
@@ -66,6 +93,22 @@ fn sanitize(mut s: DesktopLyricsSettings) -> DesktopLyricsSettings {
     } else {
         s.font_color = col.to_string();
     }
+    // 显示行数仅允许 1 或 2
+    if s.line_count != 1 && s.line_count != 2 {
+        s.line_count = 1;
+    }
+    // 显示方向仅允许 horizontal 或 vertical
+    if s.direction != "horizontal" && s.direction != "vertical" {
+        s.direction = "horizontal".to_string();
+    }
+    // 不透明度限制在 [OPACITY_MIN, OPACITY_MAX]，NaN/无穷回退默认
+    if s.opacity.is_nan() || s.opacity.is_infinite() {
+        s.opacity = OPACITY_DEFAULT;
+    } else if s.opacity < OPACITY_MIN {
+        s.opacity = OPACITY_MIN;
+    } else if s.opacity > OPACITY_MAX {
+        s.opacity = OPACITY_MAX;
+    }
     s
 }
 
@@ -86,6 +129,11 @@ pub fn desktop_lyrics_set(
     bold: Option<bool>,
     italic: Option<bool>,
     font_color: Option<String>,
+    karaoke: Option<bool>,
+    line_count: Option<u32>,
+    direction: Option<String>,
+    opacity: Option<f32>,
+    visible: Option<bool>,
 ) -> Result<DesktopLyricsSettings, String> {
     if let Some(fs) = font_size {
         if !(FONT_MIN..=FONT_MAX).contains(&fs) {
@@ -106,6 +154,21 @@ pub fn desktop_lyrics_set(
             return Err("颜色格式无效，需为 #RRGGBB".into());
         }
     }
+    if let Some(lc) = line_count {
+        if lc != 1 && lc != 2 {
+            return Err("显示行数仅支持 1（单行）或 2（双行）".into());
+        }
+    }
+    if let Some(ref dir) = direction {
+        if dir != "horizontal" && dir != "vertical" {
+            return Err("显示方向仅支持 horizontal 或 vertical".into());
+        }
+    }
+    if let Some(op) = opacity {
+        if op.is_nan() || op.is_infinite() || !(OPACITY_MIN..=OPACITY_MAX).contains(&op) {
+            return Err(format!("不透明度超出范围 [{}, {}]", OPACITY_MIN, OPACITY_MAX));
+        }
+    }
 
     let mut guard = state.desktop_lyrics.lock();
     if let Some(fs) = font_size { guard.font_size = fs; }
@@ -114,6 +177,11 @@ pub fn desktop_lyrics_set(
     if let Some(b) = bold { guard.bold = b; }
     if let Some(it) = italic { guard.italic = it; }
     if let Some(col) = font_color { guard.font_color = col.trim().to_string(); }
+    if let Some(k) = karaoke { guard.karaoke = k; }
+    if let Some(lc) = line_count { guard.line_count = lc; }
+    if let Some(dir) = direction { guard.direction = dir; }
+    if let Some(op) = opacity { guard.opacity = op; }
+    if let Some(v) = visible { guard.visible = v; }
     let current = guard.clone();
     drop(guard);
 
@@ -125,7 +193,7 @@ pub fn desktop_lyrics_set(
     Ok(current)
 }
 
-/// 恢复所有桌面歌词设置到默认值（字号/锁定/字体族/样式/颜色）。
+/// 恢复所有桌面歌词设置到默认值（字号/锁定/字体族/样式/颜色/卡拉OK/显示模式）。
 #[tauri::command]
 pub fn desktop_lyrics_reset(
     app: AppHandle,
@@ -169,4 +237,39 @@ fn config_path() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("ttplayer-next")
         .join("desktop_lyrics_settings.json")
+}
+
+// ── 全局鼠标坐标获取（用于锁定状态下轮询检测鼠标是否在角落区域）──
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" {
+    fn GetCursorPos(lp_point: *mut Point) -> i32;
+}
+
+/// 返回鼠标在屏幕上的物理坐标（像素）。
+/// 用于桌面歌词锁定后轮询检测：鼠标是否悬停在右上角解锁按钮区域，
+/// 以便动态切换 `setIgnoreCursorEvents` 实现穿透 + 可交互的共存。
+#[tauri::command]
+pub fn get_cursor_position() -> Result<(i32, i32), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut pt = Point { x: 0, y: 0 };
+        unsafe {
+            if GetCursorPos(&mut pt) != 0 {
+                return Ok((pt.x, pt.y));
+            }
+        }
+        Err("GetCursorPos failed".into())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("get_cursor_position is only supported on Windows".into())
+    }
 }

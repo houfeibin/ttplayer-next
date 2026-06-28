@@ -1,64 +1,79 @@
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
+/// Register a single global shortcut, logging a warning instead of failing
+/// when the hotkey is already registered (e.g. by a zombie process from a
+/// previous run, or by another application). This prevents a single conflict
+/// from crashing the entire app during setup.
+fn register(
+    app: &AppHandle,
+    shortcut: Shortcut,
+    label: &str,
+    handler: impl Fn(&AppHandle) + Send + Sync + 'static,
+) {
+    let gs = app.global_shortcut();
+    match gs.on_shortcut(shortcut, move |app, _sc, event| {
+        if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+            handler(app);
+        }
+    }) {
+        Ok(()) => {}
+        Err(e) => {
+            tracing::warn!("Failed to register hotkey {} (likely already held by another process): {}", label, e);
+        }
+    }
+}
+
 /// Register global media control shortcuts
 pub fn setup_hotkeys(app: &AppHandle) -> anyhow::Result<()> {
-    let gs = app.global_shortcut();
-
     // Play/Pause: Ctrl+Alt+P
-    let play_pause = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyP);
-    let app_clone = app.clone();
-    gs.on_shortcut(play_pause, move |_app, _shortcut, event| {
-        if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-            let _ = app_clone.emit("global-hotkey", "play_pause");
-        }
-    })?;
+    register(
+        app,
+        Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyP),
+        "Ctrl+Alt+P",
+        |app| { let _ = app.emit("global-hotkey", "play_pause"); },
+    );
 
     // Next: Ctrl+Alt+Right
-    let next = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::ArrowRight);
-    let app_clone = app.clone();
-    gs.on_shortcut(next, move |_app, _shortcut, event| {
-        if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-            let _ = app_clone.emit("global-hotkey", "next");
-        }
-    })?;
+    register(
+        app,
+        Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::ArrowRight),
+        "Ctrl+Alt+Right",
+        |app| { let _ = app.emit("global-hotkey", "next"); },
+    );
 
     // Prev: Ctrl+Alt+Left
-    let prev = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::ArrowLeft);
-    let app_clone = app.clone();
-    gs.on_shortcut(prev, move |_app, _shortcut, event| {
-        if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-            let _ = app_clone.emit("global-hotkey", "prev");
-        }
-    })?;
+    register(
+        app,
+        Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::ArrowLeft),
+        "Ctrl+Alt+Left",
+        |app| { let _ = app.emit("global-hotkey", "prev"); },
+    );
 
     // Stop: Ctrl+Alt+S
-    let stop = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyS);
-    let app_clone = app.clone();
-    gs.on_shortcut(stop, move |_app, _shortcut, event| {
-        if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-            let _ = app_clone.emit("global-hotkey", "stop");
-        }
-    })?;
+    register(
+        app,
+        Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyS),
+        "Ctrl+Alt+S",
+        |app| { let _ = app.emit("global-hotkey", "stop"); },
+    );
 
     // Volume Up: Ctrl+Alt+Up
-    let vol_up = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::ArrowUp);
-    let app_clone = app.clone();
-    gs.on_shortcut(vol_up, move |_app, _shortcut, event| {
-        if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-            let _ = app_clone.emit("global-hotkey", "volume_up");
-        }
-    })?;
+    register(
+        app,
+        Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::ArrowUp),
+        "Ctrl+Alt+Up",
+        |app| { let _ = app.emit("global-hotkey", "volume_up"); },
+    );
 
     // Volume Down: Ctrl+Alt+Down
-    let vol_down = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::ArrowDown);
-    let app_clone = app.clone();
-    gs.on_shortcut(vol_down, move |_app, _shortcut, event| {
-        if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-            let _ = app_clone.emit("global-hotkey", "volume_down");
-        }
-    })?;
+    register(
+        app,
+        Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::ArrowDown),
+        "Ctrl+Alt+Down",
+        |app| { let _ = app.emit("global-hotkey", "volume_down"); },
+    );
 
-    tracing::info!("Global hotkeys registered: Ctrl+Alt+P/Left/Right/S/Up/Down");
+    tracing::info!("Global hotkeys registration attempted: Ctrl+Alt+P/Left/Right/S/Up/Down");
     Ok(())
 }

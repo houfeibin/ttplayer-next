@@ -65,3 +65,6 @@ $RECYCLE.BIN/
 .temp/
 tmp/
 .eslintcache
+
+# WebView2 runtime data (generated at dev/runtime, should never be committed)
+.webview2-data/

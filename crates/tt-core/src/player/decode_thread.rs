@@ -8,7 +8,7 @@ use crate::codecs::CodecRegistry;
 use crate::dsp::crossfade::CrossfadeMixer;
 use crate::dsp::DspChain;
 use crate::output::{AudioOutput, PlaybackRing};
-use tt_common::PlaybackState;
+use tt_common::{ErrorKind, PlaybackError, PlaybackState};
 
 use super::{
     state_to_code, NextTrackProvider, PREBUFFER_MS, SharedCrossfadeRx, SharedOutput, SharedRing,
@@ -30,6 +30,8 @@ impl super::AudioPipeline {
         crossfade_pending: Arc<AtomicBool>,
         crossfade_rx: SharedCrossfadeRx,
         next_provider: Arc<Mutex<Option<Arc<dyn NextTrackProvider>>>>,
+        last_error: Arc<Mutex<Option<PlaybackError>>>,
+        track_path: String,
     ) -> anyhow::Result<()> {
         let registry = CodecRegistry::with_defaults();
 
@@ -104,7 +106,7 @@ impl super::AudioPipeline {
             }
         }
 
-        // Decode thread -?writes frames as ring frees up, with crossfade support
+        // Decode thread — writes frames as ring frees up, with crossfade support
         let ring_clone = ring.clone();
         let total_frames = instance.total_frames();
         let dsp_chain_for_thread = dsp_chain.clone();
@@ -114,6 +116,17 @@ impl super::AudioPipeline {
         let cf_ms = crossfade_ms.load(Ordering::Relaxed) as u64;
         let next_provider_clone = next_provider.clone();
         let crossfade_rx_clone = crossfade_rx.clone();
+        // State clone for the decode thread so it can signal Stopped after
+        // crossfade completes (see `mixer.is_complete()` below). Without this,
+        // the frontend never observes a state transition and playback gets
+        // stuck in `Playing` with a drained ring buffer.
+        let state_for_thread = state.clone();
+        let crossfade_pending_for_thread = crossfade_pending.clone();
+        // Error reporting clones — on decode failure the thread records a
+        // PlaybackError and transitions to Error state so the frontend can
+        // log details and auto-skip to the next track.
+        let last_error_for_thread = last_error.clone();
+        let track_path_for_thread = track_path.clone();
 
         tracing::info!(
             "DECODE START: total_frames={total_frames:?} ring_cap={} crossfade={}ms",
@@ -152,6 +165,21 @@ impl super::AudioPipeline {
                         Ok(None) => vec![0.0f32; 2048 * channels as usize],
                         Err(e) => {
                             tracing::error!("CROSSFADE current decode error: {}", e);
+                            // Record error and signal Error state so the
+                            // frontend can auto-skip. The crossfade mix is
+                            // abandoned mid-way; the ring still holds some
+                            // samples but the frontend will call playNext()
+                            // which flushes everything via stop_inner().
+                            let err = PlaybackError::new(
+                                ErrorKind::DecoderError,
+                                format!("Crossfade decode error: {}", e),
+                                Some(track_path_for_thread.clone()),
+                            );
+                            *last_error_for_thread.lock() = Some(err);
+                            state_for_thread.store(
+                                state_to_code(PlaybackState::Error),
+                                Ordering::Relaxed,
+                            );
                             break;
                         }
                     };
@@ -182,6 +210,20 @@ impl super::AudioPipeline {
                             mixer.mixed_samples(),
                             mixer.target_samples(),
                         );
+                        // Signal crossfade completion so the frontend can
+                        // advance to the next track via `playNext()`.
+                        //
+                        // The crossfade-mixed samples already in the ring will
+                        // be drained by the output callback; when `playNext()`
+                        // opens the next track, `stop_inner()` flushes the
+                        // ring and starts the new file from the beginning.
+                        // This means the first `cf_ms` of the next track play
+                        // twice (once during crossfade, once from the start),
+                        // which is a known limitation of the current
+                        // architecture — a true gapless hand-off would require
+                        // the next-track decoder to take over the ring.
+                        crossfade_pending_for_thread.store(false, Ordering::Relaxed);
+                        state_for_thread.store(state_to_code(PlaybackState::Stopped), Ordering::Relaxed);
                         break;
                     }
                     continue;
@@ -217,6 +259,7 @@ impl super::AudioPipeline {
                                         channels,
                                         &crossfade_rx_clone,
                                         &crossfade_pending,
+                                        &rt_handle,
                                     );
                                 }
                                 None => {
@@ -249,6 +292,21 @@ impl super::AudioPipeline {
                     }
                     Err(e) => {
                         tracing::error!("DECODE ERR: {}", e);
+                        // Record the error and transition to Error state so the
+                        // frontend can log details and auto-skip to the next
+                        // track. Without this the decode thread would exit
+                        // silently and leave the state stuck at `Playing`
+                        // with a frozen progress bar.
+                        let err = PlaybackError::new(
+                            ErrorKind::DecoderError,
+                            format!("Decode error: {}", e),
+                            Some(track_path_for_thread.clone()),
+                        );
+                        *last_error_for_thread.lock() = Some(err);
+                        state_for_thread.store(
+                            state_to_code(PlaybackState::Error),
+                            Ordering::Relaxed,
+                        );
                         break;
                     }
                 }
@@ -265,7 +323,17 @@ impl super::AudioPipeline {
         match tokio::runtime::Handle::current().block_on(prebuffer_timeout) {
             Ok(_) => {}
             Err(_) => {
-                state.store(state_to_code(PlaybackState::Idle), Ordering::Relaxed);
+                // Prebuffer timed out — the decoder couldn't produce enough
+                // samples in 3s, likely due to a corrupt or extremely slow
+                // file. Record the error and transition to Error state so the
+                // frontend can auto-skip.
+                let err = PlaybackError::new(
+                    ErrorKind::Cancelled,
+                    "Prebuffer timeout (decoder too slow)",
+                    Some(track_path.clone()),
+                );
+                *last_error.lock() = Some(err);
+                state.store(state_to_code(PlaybackState::Error), Ordering::Relaxed);
                 return Err(anyhow::anyhow!("prebuffer timeout"));
             }
         }

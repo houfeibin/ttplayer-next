@@ -3,7 +3,19 @@ use std::path::Path;
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::Accessor;
+use lofty::config::{ParseOptions, ParsingMode};
 use tt_common::SongMetadata;
+
+/// 构建宽松解析选项：使用 `ParsingMode::Relaxed` 模式。
+///
+/// 某些音频文件的 ID3v2 时间戳帧（如 TDRC/TYER）可能包含非 ASCII 字符，
+/// 在默认的 `BestAttempt` 模式下 lofty 会将其视为致命错误，导致整个
+/// `Probe::read()` 失败，进而使该文件的所有标签（标题、艺术家、专辑、封面等）
+/// 全部丢失。`Relaxed` 模式会丢弃无效字段并忽略大多数非致命错误，从而尽可能
+/// 读取到可用的标签信息。
+fn relaxed_parse_options() -> ParseOptions {
+    ParseOptions::new().parsing_mode(ParsingMode::Relaxed)
+}
 
 /// Read metadata tags from an audio file using lofty 0.21.
 /// Supports ID3v2 (MP3), Vorbis Comments (FLAC, Opus, Ogg Vorbis),
@@ -11,6 +23,7 @@ use tt_common::SongMetadata;
 pub fn read(path: &Path) -> anyhow::Result<SongMetadata> {
     let tagged_file = Probe::open(path)
         .map_err(|e| anyhow::anyhow!("Failed to open file for tags: {}", e))?
+        .options(relaxed_parse_options())
         .read()
         .map_err(|e| anyhow::anyhow!("Failed to read tags: {}", e))?;
 
@@ -140,6 +153,7 @@ pub fn write(path: &Path, updates: &std::collections::HashMap<String, String>) -
 
     let mut tagged_file = Probe::open(path)
         .map_err(|e| anyhow::anyhow!("Failed to open file: {}", e))?
+        .options(relaxed_parse_options())
         .read()
         .map_err(|e| anyhow::anyhow!("Failed to read tags: {}", e))?;
 

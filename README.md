@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-blue">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="Rust" src="https://img.shields.io/badge/Rust-1.96+-orange">
   <img alt="React" src="https://img.shields.io/badge/React-19-black">
@@ -28,6 +28,7 @@
 - [开发指南](#开发指南)
 - [测试](#测试)
 - [贡献规范](#贡献规范)
+- [版本变更记录](#版本变更记录)
 - [许可证](#许可证)
 - [联系方式](#联系方式)
 
@@ -480,6 +481,53 @@ cargo test -p tt-common -p tt-core -p tt-tags -p tt-playlist
 ```
 
 常用 type：`feat`（新功能）、`fix`（修复）、`refactor`（重构）、`docs`（文档）、`test`（测试）、`chore`（构建/工具）。
+
+## 版本变更记录
+
+### v0.2.0
+
+本次发布聚焦于桌面歌词、迷你模式与播放稳定性的深度优化，涵盖 36 个文件、约 2600 行变更。
+
+#### 新增功能
+
+- **桌面歌词状态记忆**：桌面歌词窗口的开启/关闭状态持久化到本地配置文件，应用重启后自动恢复上次状态
+- **桌面歌词横竖屏分别记忆**：横屏与竖屏模式的窗口位置/尺寸分别保存到 `localStorage`，互不覆盖，使用物理坐标（`PhysicalPosition`/`PhysicalSize`）确保多 DPI 环境零误差恢复
+- **桌面歌词皮肤主题集成**：文本颜色（正常/高亮/非当前行）、背景、边框、进度条（已播/未播）、控制栏、角落按钮交互态等全面跟随系统皮肤与主题，亮/暗模式实时同步
+- **标题超长滚动显示**：主界面歌曲标题超出容器宽度时自动激活平滑横向滚动（canvas `measureText` 测量 + `ResizeObserver` 响应容器变化），速度恒定 ~50px/s，鼠标悬停暂停
+- **菜单跟随皮肤主题**：「添加文件」下拉菜单与播放列表播放模式菜单改用 CSS 变量（`--bg-tertiary`、`--border-color`、`--accent-rgb` 等），与系统皮肤/主题保持一致
+- **标签即时刷新**：手动编辑并保存歌曲标签后，播放器界面立即刷新元数据显示，无需手动刷新或重启，且不干扰播放状态
+- **文件名回退显示**：无标签的音频文件回退显示文件名，并支持滚动动画
+
+#### 修复的问题
+
+- **随机模式标签错位**：快速切歌时旧歌的异步标签读取会覆盖新歌的 `metadata`，现通过后端 `current_file` 校验 + 前端 `fileChanged` 过滤双重保障，确保标签与播放曲目实时同步
+- **进度条点击回退**：点击进度条跳转后短暂回退到原位置再跳转，根因为后端 50ms 事件推送的旧位置数据覆盖乐观更新，现通过 `seekingTo` 守卫过滤陈旧位置更新
+- **迷你模式导致桌面歌词冻结**：切换到迷你模式后桌面歌词窗口无响应且歌词不更新，根因为 `useDesktopLyrics` hook 随 `LyricsPanel` 卸载而 cleanup，已将 hook 提升至 `MainPanel`（`if (miniMode) return` 之前）保持活跃
+- **迷你模式切换闪现**：进入/退出迷你模式时短暂闪现旧界面帧，通过在 `hide()` 前设置 `opacity=0` 并等待两次 `requestAnimationFrame` 确保 OS 缓存空白帧
+- **迷你模式按钮与拖拽失效**：`setResizable(false)` 在 Tauri 2 中破坏 `data-tauri-drag-region` 并导致布局异常，改用 `minSize == maxSize` 保持窗口不可缩放同时维持可拖拽；`data-tauri-drag-region` 改用 `"deep"` 模式支持子树拖拽；React 状态更新改用 `flushSync` 确保 DOM 提交后再调整窗口尺寸
+- **桌面歌词窗口偶发无响应**：锁定轮询产生大量无变化 IPC 调用（50 次/秒）+ 无节流 `lyrics-update`（20Hz）+ 60Hz RAF 空转导致 IPC 拥塞与渲染积压，已通过缓存上次值仅在变化时调用 IPC、`lyrics-update` 节流到 ~8Hz、RAF 收敛后停止循环三项优化解决
+- **窗口位置/大小监听器泄漏**：`onMoved`/`onResized` 的 `unlisten` 局部变量模式在 Promise resolve 前卸载时命中 `undefined`，改为 `promise.then(fn => fn())` 模式确保竞态安全
+- **切歌后桌面歌词残留**：切换到无歌词歌曲时桌面歌词仍显示上一首内容，现发送空 payload 清空并显示「♪ 暂无歌词 ♪」
+- **切歌后歌词面板不重置**：主窗口歌词面板在切歌后未回到顶部，通过 `linesContainerRef` 监听 `currentFile` 变化时重置 `scrollTop = 0`
+- **Crossfade panic**：解码线程（非 Tokio 线程）中调用 `tokio::task::spawn_blocking` 导致 "no reactor running" panic，改用 `rt_handle.spawn_blocking` 通过 `Handle` 提交阻塞任务到 Tokio 运行时
+- **ID3v2 标签读取失败**：部分文件的 ID3v2 时间戳帧（`TDRC`/`TYER`）含非 ASCII 字符，在默认 `BestAttempt` 模式下导致整个标签读取失败，现使用 `ParsingMode::Relaxed` 丢弃无效字段继续解析
+- **应用关闭时桌面歌词状态错误持久化**：`tauri://destroyed` 事件无法区分用户关闭窗口与应用关闭，导致应用关闭时 `visible` 被错误设为 `false`，通过 `isAppClosingRef` 标志区分
+
+#### 性能改进
+
+- **桌面歌词锁定轮询优化**：缓存窗口几何（`outerPosition`/`outerSize`/`scaleFactor`），仅在首次或失效时查询，减少 IPC 调用；缓存 `setIgnoreCursorEvents`/`setCornerHovered` 上次值，仅在变化时调用
+- **桌面歌词事件节流**：`lyrics-update` 的 `currentIndex` 变化时强制推送，`progress` 变化时节流到 120ms（~8Hz），避免 20Hz 无节流 `emitTo` 导致桌面窗口 IPC 反序列化与 React 渲染积压
+- **桌面歌词 RAF 优化**：逐字动画的 `requestAnimationFrame` 在收敛（`|diff| < 0.03`）后停止循环，`target` 变化时重启，降低暂停/无歌词时的空闲 CPU 占用
+- **窗口几何物理坐标恢复**：桌面歌词位置/尺寸使用 `PhysicalPosition`/`PhysicalSize`，避免逻辑坐标在多 DPI 环境下的精度损失
+
+#### 其他变更
+
+- 播放状态文本 `Stereo`/`Mono` 改为中文「立体声」/「单声道」
+- 主界面歌曲标题最大显示宽度从 200px 缩短至 140px，为进度条与控制按钮留出更多空间，艺术家名同步对齐
+- 应用图标资源更新
+- 迷你模式窗口位置持久化到 `localStorage`（key: `ttplayer:mini-mode-pos`），重启后恢复
+
+---
 
 ## 许可证
 

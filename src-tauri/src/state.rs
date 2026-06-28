@@ -20,12 +20,16 @@ struct PlaylistNextProvider {
 
 impl NextTrackProvider for PlaylistNextProvider {
     fn next_track(&self) -> Option<PathBuf> {
-        let pl = self.playlist.lock();
+        let mut pl = self.playlist.lock();
         // Use peek_next_path so the play mode is respected (Loop wraps, Random
         // avoids repeats, etc.) WITHOUT advancing current_index — the active
         // track is still playing and its index must not change until the
         // crossfade completes and a new track is explicitly requested.
-        pl.active().peek_next_path().map(PathBuf::from)
+        //
+        // For Random mode, peek_next_path caches the picked index into
+        // `pending_random_index` so the later `next()` call (after crossfade
+        // completes) consumes the *same* track instead of rolling again.
+        pl.active_mut().peek_next_path().map(PathBuf::from)
     }
 }
 
