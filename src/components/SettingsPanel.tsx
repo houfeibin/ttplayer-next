@@ -710,7 +710,9 @@ export default function SettingsPanel({ onClose }: Props) {
                             : m;
                           document.documentElement.setAttribute('data-theme', resolved);
                           // Sync to desktop lyrics window
-                          void emitTo('lyrics-desktop', 'theme-changed', { mode: m }).catch(() => {});
+                          void emitTo('lyrics-desktop', 'theme-changed', { mode: m })
+                            .then(() => console.log('[TTPlayer] theme-changed emitted, mode =', m))
+                            .catch((e: unknown) => console.error('[TTPlayer] theme-changed emit failed:', e));
                         }}
                         style={{ padding: '6px 10px', fontSize: 12 }}
                       >

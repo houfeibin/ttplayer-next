@@ -1,3 +1,8 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 fn main() {
     // WebView2 默认使用 %LOCALAPPDATA%\<identifier>\EBWebView 作为用户数据目录。
     // 当应用异常退出时，子进程 msedgewebview2.exe 可能未被清理，持有目录锁，

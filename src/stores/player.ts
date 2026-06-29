@@ -159,10 +159,14 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
       durationMs: p.durationMs,
       volume: p.volume,
       currentFile: p.currentFile,
-      // 切歌瞬间后端可能推送旧歌的 metadata（spawn_blocking 尚未完成）。
-      // fileChanged 时保留当前 metadata，等后端 metadata_changed 推送新 metadata 时再更新，
-      // 避免"显示A的标签却播放B"的错位。
-      metadata: fileChanged ? cur.metadata : (p.metadata ?? cur.metadata),
+      // 后端 transport.rs 的 is_current 检查已保证 player.metadata() 永远是
+      // 当前文件（current_file == tags_path 时才写入）或上一个文件的陈旧 metadata。
+      // 因此 payload 中的 metadata 可直接采用：
+      //   - 若是新文件已读取的新 metadata → 正确应用（修复切歌竞态：当异步标签
+      //     读取在新歌首 tick 前完成时，file_changed 与 metadata_changed 同时为真，
+      //     后端只发送一次新 metadata，原 fileChanged 守卫会丢弃它且永不再重发）。
+      //   - 若是上一个文件的陈旧 metadata → 与当前 cur.metadata 相同，无副作用。
+      metadata: p.metadata ?? cur.metadata,
       spectrum: p.spectrum?.bands ?? cur.spectrum,
       spectrumPeak: p.spectrum?.peak ?? 0,
       // Mirror the backend's error field. When the backend clears the error

@@ -37,17 +37,52 @@ export default function SkinProvider({ children }: { children: React.ReactNode }
 }
 
 /**
- * Inject or update the skin CSS variables <style> element in <head>.
+ * Inject or update the skin CSS variables using a constructed stylesheet.
+ *
+ * Constructed stylesheets (CSSStyleSheet) bypass CSP `style-src` inline
+ * restrictions, so skin CSS keeps applying even when Tauri/Vite injects a
+ * nonce in dev mode (which makes 'unsafe-inline' be ignored per CSP spec).
  */
-let styleEl: HTMLStyleElement | null = null;
+let skinSheet: CSSStyleSheet | null = null;
 
 function injectCss(css: string) {
-  if (!styleEl) {
-    styleEl = document.createElement('style');
-    styleEl.id = 'ttplayer-skin-vars';
-    document.head.appendChild(styleEl);
+  try {
+    if (!skinSheet) {
+      skinSheet = new CSSStyleSheet();
+    }
+    skinSheet.replaceSync(css);
+    const sheets = document.adoptedStyleSheets;
+    if (!sheets.includes(skinSheet)) {
+      document.adoptedStyleSheets = [...sheets, skinSheet];
+    }
+  } catch (e) {
+    console.error('[TTPlayer] injectCss failed:', e);
   }
-  styleEl.textContent = css;
+}
+
+/**
+ * Emit `skin-changed` to the desktop lyrics window with retry.
+ *
+ * Tauri 2's `emitTo` can occasionally fail if the target webview is still
+ * initializing or the IPC channel is momentarily busy. We retry a few times
+ * with backoff so that skin switches reliably reach the desktop lyrics window.
+ */
+async function emitSkinChanged(payload: { skinId: string; css: string }): Promise<void> {
+  const MAX_ATTEMPTS = 3;
+  const BASE_DELAY_MS = 80;
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await emitTo('lyrics-desktop', 'skin-changed', payload);
+      return;
+    } catch (e) {
+      lastErr = e;
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, BASE_DELAY_MS * attempt));
+      }
+    }
+  }
+  console.error('[TTPlayer] skin-changed emit failed after retries:', lastErr);
 }
 
 /**
@@ -66,7 +101,7 @@ export async function applySkin(skinId: string): Promise<void> {
     injectCss(css);
 
     // Notify the desktop lyrics window (if open) to re-inject the new CSS.
-    void emitTo('lyrics-desktop', 'skin-changed', { skinId, css }).catch(() => {});
+    void emitSkinChanged({ skinId, css });
   } catch (e) {
     console.error('Failed to apply skin:', e);
   }

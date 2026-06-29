@@ -8,6 +8,34 @@
 use std::path::Path;
 use serde::{Deserialize, Serialize};
 
+/// Decode raw LRC file bytes to a UTF-8 string.
+///
+/// Strategy (matches common behavior of Chinese music apps):
+/// 1. If the bytes start with a UTF-8 BOM, decode as UTF-8 directly.
+/// 2. Otherwise, try UTF-8 first — if valid, use it.
+/// 3. Fall back to chardetng detection, which identifies GBK/Big5/Shift-JIS.
+fn decode_lrc_bytes(bytes: &[u8]) -> String {
+    // Fast path: UTF-8 BOM or valid UTF-8
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return String::from_utf8_lossy(&bytes[3..]).into_owned();
+    }
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    // Legacy encoding — detect and convert
+    let mut detector = chardetng::EncodingDetector::new();
+    detector.feed(bytes, true);
+    let encoding = detector.guess(None, true);
+    let (decoded, _enc_name, had_errors) = encoding.decode(bytes);
+    if had_errors {
+        tracing::warn!(
+            "LRC file decoded with errors; encoding detected as {}",
+            encoding.name()
+        );
+    }
+    decoded.into_owned()
+}
+
 /// Parsed LRC file with metadata and timed lines.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LrcFile {
@@ -240,8 +268,14 @@ fn strip_word_tags(text: &str) -> String {
 }
 
 /// Try to read and parse an LRC file from the given path.
+///
+/// Handles files saved in UTF-8 (with or without BOM), and legacy
+/// GBK / Big5 / Shift-JIS encodings commonly used by Chinese music
+/// services. Returns `None` if the file cannot be read, decoded, or
+/// contains no valid timed lines.
 pub fn read_lrc_file(path: &Path) -> Option<LrcFile> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let bytes = std::fs::read(path).ok()?;
+    let content = decode_lrc_bytes(&bytes);
     let lrc = parse_lrc(&content);
     if lrc.lines.is_empty() {
         None
@@ -311,7 +345,10 @@ pub fn find_lrc_for_audio(audio_path: &Path) -> Option<std::path::PathBuf> {
 }
 
 /// Search for LRC files in a directory matching the audio file name.
-/// Also checks for common variations: same name, same name with .txt, etc.
+///
+/// Matching is case-insensitive (Windows file system is case-insensitive,
+/// and users often download `Song.LRC` alongside `song.mp3`). Returns exact
+/// matches first, then partial-name matches.
 pub fn search_lrc_files(audio_path: &Path) -> Vec<std::path::PathBuf> {
     let dir = match audio_path.parent() {
         Some(d) => d,
@@ -321,26 +358,35 @@ pub fn search_lrc_files(audio_path: &Path) -> Vec<std::path::PathBuf> {
         Some(s) => s,
         None => return Vec::new(),
     };
+    let stem_lc = stem.to_lowercase();
 
     let mut results = Vec::new();
 
-    // Exact match: song.lrc
+    // Exact match: song.lrc (case-insensitive on the stem; Windows resolves
+    // the actual file on disk via `exists()`)
     let exact = dir.join(format!("{}.lrc", stem));
     if exact.exists() {
         results.push(exact);
     }
 
-    // Scan directory for any .lrc files
+    // Scan directory for any .lrc files (case-insensitive extension match)
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("lrc") {
-                let lrc_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                // Match if the LRC stem contains the audio stem or vice versa
-                if lrc_stem.contains(stem) || stem.contains(lrc_stem) {
-                    if !results.contains(&path) {
-                        results.push(path);
-                    }
+            let ext_match = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("lrc"))
+                .unwrap_or(false);
+            if !ext_match {
+                continue;
+            }
+            let lrc_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            let lrc_stem_lc = lrc_stem.to_lowercase();
+            // Match if either stem contains the other (case-insensitive)
+            if lrc_stem_lc.contains(&stem_lc) || stem_lc.contains(&lrc_stem_lc) {
+                if !results.contains(&path) {
+                    results.push(path);
                 }
             }
         }
@@ -352,6 +398,62 @@ pub fn search_lrc_files(audio_path: &Path) -> Vec<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_decode_utf8_with_bom() {
+        let content = "[00:01.00]测试歌词\n";
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(content.as_bytes());
+        let decoded = decode_lrc_bytes(&bytes);
+        assert_eq!(decoded, content);
+    }
+
+    #[test]
+    fn test_decode_plain_utf8() {
+        let content = "[00:01.00]测试歌词\n";
+        let decoded = decode_lrc_bytes(content.as_bytes());
+        assert_eq!(decoded, content);
+    }
+
+    #[test]
+    fn test_decode_gbk() {
+        // A realistic GBK-encoded LRC excerpt. The ASCII `[ti:]` tag and
+        // newlines give chardetng enough context to identify GBK reliably.
+        // Source text:
+        //   [ti:测试歌曲]
+        //   [00:01.00]第一行歌词
+        //   [00:03.50]第二行歌词
+        let gbk_bytes: &[u8] = &[
+            0x5B, 0x74, 0x69, 0x3A, 0xB2, 0xE2, 0xCA, 0xD4, 0xB8, 0xE8, 0xC7, 0xFA, 0x5D, 0x0A,
+            0x5B, 0x30, 0x30, 0x3A, 0x30, 0x31, 0x2E, 0x30, 0x30, 0x5D, 0xB5, 0xDA, 0xD2, 0xBB,
+            0xD0, 0xD0, 0xB8, 0xE8, 0xB4, 0xCA, 0x0A,
+            0x5B, 0x30, 0x30, 0x3A, 0x30, 0x33, 0x2E, 0x35, 0x30, 0x5D, 0xB5, 0xDA, 0xB6, 0xFE,
+            0xD0, 0xD0, 0xB8, 0xE8, 0xB4, 0xCA, 0x0A,
+        ];
+        let decoded = decode_lrc_bytes(gbk_bytes);
+        assert!(decoded.contains("测试歌曲"), "missing title in: {}", decoded);
+        assert!(decoded.contains("第一行歌词"), "missing line 1 in: {}", decoded);
+        assert!(decoded.contains("第二行歌词"), "missing line 2 in: {}", decoded);
+    }
+
+    #[test]
+    fn test_search_lrc_files_case_insensitive() {
+        let dir = std::env::temp_dir();
+        let audio = dir.join("MyCaseInsensitiveTest.mp3");
+        std::fs::write(&audio, b"").unwrap();
+        // Uppercase .LRC extension, different case in stem
+        let lrc = dir.join("mycaseinsensitivetest.LRC");
+        std::fs::write(&lrc, b"[00:01.00]test\n").unwrap();
+        let results = search_lrc_files(&audio);
+        assert!(
+            results.iter().any(|p| p == &lrc),
+            "expected case-insensitive match to find {:?}, got {:?}",
+            lrc,
+            results
+        );
+        let _ = std::fs::remove_file(&audio);
+        let _ = std::fs::remove_file(&lrc);
+    }
 
     #[test]
     fn test_parse_standard_lrc() {

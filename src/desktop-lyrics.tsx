@@ -46,7 +46,11 @@ function resolveTheme(mode: ThemeMode): 'light' | 'dark' {
  */
 function useSkinCss() {
   useEffect(() => {
-    let styleEl: HTMLStyleElement | null = null;
+    // Use constructed stylesheet (CSSStyleSheet) instead of a <style> element:
+    // constructed stylesheets bypass CSP `style-src` inline restrictions, so they
+    // keep working even when Tauri/Vite injects a nonce in dev mode (which makes
+    // 'unsafe-inline' be ignored per CSP spec).
+    let skinSheet: CSSStyleSheet | null = null;
     let currentMode: ThemeMode = 'dark';
 
     const applyTheme = (mode: ThemeMode) => {
@@ -55,12 +59,18 @@ function useSkinCss() {
     };
 
     const injectCss = (css: string) => {
-      if (!styleEl) {
-        styleEl = document.createElement('style');
-        styleEl.id = 'ttplayer-skin-vars';
-        document.head.appendChild(styleEl);
+      try {
+        if (!skinSheet) {
+          skinSheet = new CSSStyleSheet();
+        }
+        skinSheet.replaceSync(css);
+        const sheets = document.adoptedStyleSheets;
+        if (!sheets.includes(skinSheet)) {
+          document.adoptedStyleSheets = [...sheets, skinSheet];
+        }
+      } catch (e) {
+        console.error('[TTPlayer] desktop-lyrics injectCss failed:', e);
       }
-      styleEl.textContent = css;
     };
 
     (async () => {
@@ -69,28 +79,42 @@ function useSkinCss() {
         const id = await skinGetCurrent();
         const css = await skinApply(id);
         injectCss(css);
+        console.log('[TTPlayer] desktop-lyrics skin init ok, skinId =', id, 'css len =', css.length);
 
         // Load and apply theme mode
         const raw = await themeGetMode();
         currentMode = (raw === 'light' || raw === 'system') ? raw : 'dark';
         applyTheme(currentMode);
       } catch (e) {
-        console.error('Desktop lyrics skin init error:', e);
+        console.error('[TTPlayer] desktop-lyrics skin init error:', e);
         applyTheme('dark');
       }
     })();
 
     // Listen for skin changes from the main window
-    const unlistenSkin = listen<{ skinId: string; css: string }>('skin-changed', (event) => {
-      injectCss(event.payload.css);
+    const unlistenSkinP = listen<{ skinId: string; css: string }>('skin-changed', (event) => {
+      console.log('[TTPlayer] desktop-lyrics received skin-changed, skinId =', event.payload.skinId, 'css len =', event.payload.css?.length);
+      if (event.payload && typeof event.payload.css === 'string') {
+        injectCss(event.payload.css);
+      } else {
+        console.warn('[TTPlayer] desktop-lyrics skin-changed payload missing css');
+      }
     });
+    unlistenSkinP.then(
+      () => console.log('[TTPlayer] desktop-lyrics skin-changed listener registered'),
+      (e) => console.error('[TTPlayer] desktop-lyrics skin-changed listener FAILED:', e)
+    );
 
     // Listen for theme mode changes from the main window
-    const unlistenTheme = listen<{ mode: string }>('theme-changed', (event) => {
+    const unlistenThemeP = listen<{ mode: string }>('theme-changed', (event) => {
       const mode = event.payload.mode as ThemeMode;
       currentMode = mode;
       applyTheme(mode);
     });
+    unlistenThemeP.then(
+      () => console.log('[TTPlayer] desktop-lyrics theme-changed listener registered'),
+      (e) => console.error('[TTPlayer] desktop-lyrics theme-changed listener FAILED:', e)
+    );
 
     // Listen for OS theme changes when mode === 'system'
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -100,9 +124,11 @@ function useSkinCss() {
     mq.addEventListener('change', onChange);
 
     return () => {
-      unlistenSkin.then(fn => fn());
-      unlistenTheme.then(fn => fn());
-      if (styleEl) document.head.removeChild(styleEl);
+      unlistenSkinP.then(fn => fn());
+      unlistenThemeP.then(fn => fn());
+      if (skinSheet) {
+        document.adoptedStyleSheets = document.adoptedStyleSheets.filter(s => s !== skinSheet);
+      }
       mq.removeEventListener('change', onChange);
     };
   }, []);
@@ -491,7 +517,11 @@ function DesktopLyrics() {
     } else {
       // 横屏：每行高度 ≈ fontSize
       const lineCount = hasLine2 ? 2 : 1;
-      width = Math.max(w1, w2) + 2 * padH;
+      // 安全余量：canvas measureText 与 WebView 实际文本渲染宽度存在子像素差异
+      // （生产环境字体 hinting/抗锯齿可能让实际宽度略大于测量值），单行模式下
+      // padH=20 已有空间，但仍需额外余量防止左侧文字被截断。余量按字号比例缩放。
+      const safetyPad = Math.max(8, fontSize * 0.25);
+      width = Math.max(w1, w2) + 2 * padH + safetyPad;
       height = lineCount * (fontSize + 2 * padV);
     }
 

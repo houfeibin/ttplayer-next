@@ -6,6 +6,35 @@
     <title>TTPlayer Desktop Lyrics</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
+      /*
+        皮肤 CSS 变量默认值：与 crates/tt-core/src/data/builtin-skins/default/skin.json 对齐。
+        生产环境下 useSkinCss() 通过异步 IPC (skin_apply) 注入皮肤 CSS，
+        在注入完成前 :root 上没有任何变量，导致 var(--border-color)、var(--accent)
+        解析失败 → 边框透明、颜色不应用主题。这里提供 fallback，确保
+        从窗口创建到皮肤 CSS 注入完成期间也有可用的视觉表现。
+      */
+      :root {
+        --bg-primary: #0f061a;
+        --bg-secondary: #1a0f2e;
+        --bg-tertiary: #251540;
+        --text-primary: #e0d4ff;
+        --text-primary-rgb: 224, 212, 255;
+        --text-secondary: #a78bfa;
+        --highlight: #f5d78a;
+        --accent: #7c3aed;
+        --accent-hover: #8b5cf6;
+        --accent-rgb: 124, 58, 237;
+        --accent-light: #C4B5FD;
+        --progress-fill: #8b5cf6;
+        --progress-bg: #2a1a4a;
+        --border-color: #3a2a5a;
+        --panel-bg: #0f061a;
+        --button-bg: #2a1a4a;
+        --button-hover: #3a2a5a;
+        --border-radius: 4px;
+        --font-title: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        --font-body: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+      }
       html, body {
         height: 100%;
         background: transparent;

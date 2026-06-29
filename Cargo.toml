@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT"
@@ -52,6 +52,9 @@ nom = "7"
 
 # --- Encoding ---
 base64 = "0.22"
+# Detect + convert legacy GBK/Big5/Shift-JIS .lrc files to UTF-8
+encoding_rs = "0.8"
+chardetng = "0.1"
 
 # --- Tauri ---
 tauri = { version = "2", features = [] }

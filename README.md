@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.2.1-blue">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="Rust" src="https://img.shields.io/badge/Rust-1.96+-orange">
   <img alt="React" src="https://img.shields.io/badge/React-19-black">
@@ -484,6 +484,39 @@ cargo test -p tt-common -p tt-core -p tt-tags -p tt-playlist
 
 ## 版本变更记录
 
+### v0.2.1
+
+本次发布为修复补丁版本，聚焦于桌面歌词皮肤同步、CSP 安全策略、LRC 歌词编码识别及 Windows 构建稳定性。
+
+#### 新增功能
+
+- **LRC 传统编码自动识别**：LRC 歌词文件现支持自动检测并转换 GBK / Big5 / Shift-JIS 等传统编码至 UTF-8，匹配国内主流音乐应用的解码行为，解决中文歌词乱码问题。解码顺序：UTF-8 BOM → 原生 UTF-8 → `chardetng` 编码检测兜底
+- **LRC 文件名大小写不敏感匹配**：`search_lrc_files` 改为大小写不敏感匹配 `.lrc` 扩展名与文件名（如 `Song.LRC` 可匹配 `song.mp3`），适配 Windows 大小写不敏感文件系统及用户下载习惯
+- **NSIS 安装包简体中文**：Windows 安装包添加简体中文语言支持
+
+#### 修复的问题
+
+- **桌面歌词皮肤切换不同步**：修复桌面歌词窗口完全不跟随主窗口皮肤切换的问题。根因为多重故障叠加：
+  1. `emitTo('lyrics-desktop', 'skin-changed')` 静默失败（`.catch(() => {})`）且无重试 → 添加 3 次重试 + 指数退避（80ms/160ms）
+  2. Tauri 2 dev 模式下 Vite 注入 CSP nonce 导致 `'unsafe-inline'` 被忽略，`<style>` 元素的 `textContent` 赋值被阻止 → 改用 `CSSStyleSheet` 构造样式表（`adoptedStyleSheets` API），绕过 CSP inline 限制
+  3. 缺少诊断日志无法定位故障点 → 全链路添加日志（emit 成功/失败、listener 注册、CSS 注入、payload 校验）
+- **CSP 阻止 IPC 通信**：Tauri 2 的 IPC 通过 `http://ipc.localhost/` 发送请求，但 CSP `connect-src` 仅配置了 `ipc:` 而未包含 `http://ipc.localhost`，导致所有 IPC 调用（`playlist_get_play_mode`、`skin_list`、`plugin:event|listen` 等）被 CSP 拦截并回退到 `postMessage` 接口。已在 CSP 添加 `http://ipc.localhost`
+- **Windows 构建脚本间歇性 panic**：`embed_resource` crate 在调用 `rustc_version::version_meta()` 时触发 Rust std 的 `Command::output` Windows 已知 bug（返回 `code: 0` 但被当作 `Err`），导致 release/debug 构建随机失败。已在 `build.rs` 添加 `catch_unwind` + 5 次重试机制，重试均失败时回退到最小 cfg 保证可编译
+- **切歌 metadata 错位**：切歌瞬间前端使用 `fileChanged` 守卫保留旧 metadata，但当新歌异步标签读取在新歌首 tick 前完成时，`file_changed` 与 `metadata_changed` 同时为真会导致后端只发送一次新 metadata，前端守卫却永久丢弃它。简化为 `p.metadata ?? cur.metadata`，依赖后端 `is_current` 校验保证 payload 始终对应当前文件
+- **桌面歌词横屏左侧文字截断**：`canvas.measureText` 与 WebView 实际文本渲染宽度存在子像素差异（生产环境字体 hinting/抗锯齿可能让实际宽度略大于测量值），单行模式下 `padH=20` 不足，添加按字号比例缩放的安全余量（`max(8, fontSize * 0.25)`）防止左侧文字被截断
+
+#### 改进
+
+- **桌面歌词 CSS 变量 fallback**：`lyrics-desktop.html` 添加与 `default` 皮肤对齐的 CSS 变量默认值，确保从窗口创建到皮肤 CSS 异步注入完成期间也有正确的视觉表现，避免边框透明、颜色不应用主题的闪烁
+- **皮肤同步诊断日志**：主窗口 `applySkin`、`SettingsPanel` 主题切换、桌面歌词 `useSkinCss` 全链路添加结构化日志（`[TTPlayer]` 前缀），便于排查事件送达、监听器注册、CSS 注入各环节故障
+- **入口属性位置修正**：将 `windows_subsystem = "windows"` 属性从 `lib.rs` 移至 `main.rs`，符合 Tauri 2 二进制入口约定
+
+#### 重大变更
+
+无
+
+---
+
 ### v0.2.0
 
 本次发布聚焦于桌面歌词、迷你模式与播放稳定性的深度优化，涵盖 36 个文件、约 2600 行变更。
@@ -500,7 +533,7 @@ cargo test -p tt-common -p tt-core -p tt-tags -p tt-playlist
 
 #### 修复的问题
 
-- **随机模式标签错位**：快速切歌时旧歌的异步标签读取会覆盖新歌的 `metadata`，现通过后端 `current_file` 校验 + 前端 `fileChanged` 过滤双重保障，确保标签与播放曲目实时同步
+- **随机模式标签错位**：快速切歌时旧歌的异步标签读取会覆盖新歌的 `metadata`，现通过后端 `current_file` 校验（`is_current` 检查丢弃非当前文件的标签）保障 `player.metadata()` 始终对应当前文件；前端直接采用 payload 中的 metadata（曾用 `fileChanged` 守卫保留旧值，但当新歌标签读取在新歌首 tick 前完成时会永久丢弃新 metadata，已在 0.2.x 修复）
 - **进度条点击回退**：点击进度条跳转后短暂回退到原位置再跳转，根因为后端 50ms 事件推送的旧位置数据覆盖乐观更新，现通过 `seekingTo` 守卫过滤陈旧位置更新
 - **迷你模式导致桌面歌词冻结**：切换到迷你模式后桌面歌词窗口无响应且歌词不更新，根因为 `useDesktopLyrics` hook 随 `LyricsPanel` 卸载而 cleanup，已将 hook 提升至 `MainPanel`（`if (miniMode) return` 之前）保持活跃
 - **迷你模式切换闪现**：进入/退出迷你模式时短暂闪现旧界面帧，通过在 `hide()` 前设置 `opacity=0` 并等待两次 `requestAnimationFrame` 确保 OS 缓存空白帧

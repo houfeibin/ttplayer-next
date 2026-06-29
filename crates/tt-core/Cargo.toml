@@ -27,6 +27,8 @@ log.workspace = true
 zip.workspace = true
 dirs.workspace = true
 base64.workspace = true
+encoding_rs.workspace = true
+chardetng.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
