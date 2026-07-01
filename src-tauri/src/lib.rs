@@ -184,6 +184,8 @@ pub fn run() {
             commands::playlist::playlist_set_play_mode,
             commands::tags::tags_read,
             commands::tags::tags_write,
+            commands::tags::tags_read_batch,
+            commands::tags::tags_write_batch,
             commands::lyrics::lyrics_load,
             commands::lyrics::lyrics_search,
             commands::lyrics::lyrics_auto_load,

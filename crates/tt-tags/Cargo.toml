@@ -8,3 +8,4 @@ tt-common = { path = "../tt-common" }
 lofty.workspace = true
 anyhow.workspace = true
 base64 = "0.22"
+serde = { version = "1", features = ["derive"] }

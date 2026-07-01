@@ -210,20 +210,81 @@ impl super::AudioPipeline {
                             mixer.mixed_samples(),
                             mixer.target_samples(),
                         );
-                        // Signal crossfade completion so the frontend can
-                        // advance to the next track via `playNext()`.
+                        // Drain the ring before signaling Stopped.
                         //
-                        // The crossfade-mixed samples already in the ring will
-                        // be drained by the output callback; when `playNext()`
-                        // opens the next track, `stop_inner()` flushes the
-                        // ring and starts the new file from the beginning.
-                        // This means the first `cf_ms` of the next track play
-                        // twice (once during crossfade, once from the start),
-                        // which is a known limitation of the current
-                        // architecture — a true gapless hand-off would require
-                        // the next-track decoder to take over the ring.
-                        crossfade_pending_for_thread.store(false, Ordering::Relaxed);
+                        // The mixer has finished writing the fade-out tail, but
+                        // those samples still sit in the ring buffer awaiting
+                        // playback by the output callback. If we signal Stopped
+                        // now, the frontend's `playNext()` calls `stop_inner()`
+                        // which flushes the ring — discarding the un-played
+                        // fade-out tail (and any un-mixed current-track samples
+                        // still buffered). The listener would hear the track
+                        // cut off early by the ring's buffered amount (up to
+                        // ~10s) and the crossfade transition would be inaudible.
+                        //
+                        // Instead we wait for the output callback to drain the
+                        // ring (read_pos catches up to write_pos) before
+                        // signaling completion. The drain budget is derived
+                        // from the currently buffered duration plus a margin
+                        // so it adapts to the actual fill level. A state change
+                        // (user manual skip/stop, which transitions away from
+                        // Playing/Paused) aborts the drain early so the old
+                        // decode thread doesn't block a freshly started track.
+                        let avail_frames = ring_clone.available();
+                        let drain_budget_ms =
+                            (avail_frames as u64 * 1000) / sample_rate as u64 + 3000;
+                        let drain_deadline = Instant::now()
+                            + std::time::Duration::from_millis(drain_budget_ms);
+                        loop {
+                            if ring_clone.available() == 0 {
+                                tracing::info!("CROSSFADE: ring drained, signaling completion");
+                                break;
+                            }
+                            let st = state_for_thread.load(Ordering::Relaxed);
+                            if st != state_to_code(PlaybackState::Playing)
+                                && st != state_to_code(PlaybackState::Paused)
+                            {
+                                tracing::info!(
+                                    "CROSSFADE drain: state changed (code={}), aborting drain",
+                                    st
+                                );
+                                break;
+                            }
+                            let now = Instant::now();
+                            if now >= drain_deadline {
+                                tracing::warn!(
+                                    "CROSSFADE drain: timed out after {}ms (avail={} frames), forcing completion",
+                                    drain_budget_ms,
+                                    ring_clone.available(),
+                                );
+                                break;
+                            }
+                            // Wait in short steps so we can re-check
+                            // state/timeout between waits (e.g. detect a
+                            // manual skip promptly).
+                            let remaining = drain_deadline.saturating_duration_since(now);
+                            let step = std::cmp::min(
+                                remaining,
+                                std::time::Duration::from_millis(500),
+                            );
+                            let _ = rt_handle.block_on(async {
+                                tokio::time::timeout(
+                                    step,
+                                    ring_clone.wait_until_drained(),
+                                ).await
+                            });
+                        }
+                        // Order matters: set Stopped BEFORE clearing
+                        // crossfade_pending. The event-push thread polls
+                        // these two atomics independently; if it observes
+                        // crossfadePending=false while state is still Playing,
+                        // the frontend's `else if` branch clears
+                        // crossfadeActiveRef, and the subsequent Stopped tick
+                        // no longer triggers playNext — playback stalls. Setting
+                        // Stopped first guarantees the frontend sees the
+                        // terminal state while crossfadeActiveRef is still true.
                         state_for_thread.store(state_to_code(PlaybackState::Stopped), Ordering::Relaxed);
+                        crossfade_pending_for_thread.store(false, Ordering::Relaxed);
                         break;
                     }
                     continue;

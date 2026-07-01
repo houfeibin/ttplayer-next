@@ -3,6 +3,7 @@ import { emitTo, listen } from '@tauri-apps/api/event';
 import { usePlayerStore } from '@/stores/player';
 import { useSkinStore } from '@/stores/skin';
 import { useLyricsStore, type LyricsTextAlign } from '@/stores/lyrics';
+import { APP_VERSION } from '@/version';
 import { applySkin } from '@/components/SkinProvider';
 import {
   crossfadeGetDuration, crossfadeSetDuration,
@@ -709,8 +710,11 @@ export default function SettingsPanel({ onClose }: Props) {
                             ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
                             : m;
                           document.documentElement.setAttribute('data-theme', resolved);
-                          // Sync to desktop lyrics window
-                          void emitTo('lyrics-desktop', 'theme-changed', { mode: m })
+                          // Sync to desktop lyrics window and batch editor window
+                          void Promise.allSettled([
+                            emitTo('lyrics-desktop', 'theme-changed', { mode: m }),
+                            emitTo('batch-editor', 'theme-changed', { mode: m }),
+                          ])
                             .then(() => console.log('[TTPlayer] theme-changed emitted, mode =', m))
                             .catch((e: unknown) => console.error('[TTPlayer] theme-changed emit failed:', e));
                         }}
@@ -743,7 +747,7 @@ export default function SettingsPanel({ onClose }: Props) {
             <div className={styles.section}>
               <div className={styles.aboutContent}>
                 <h3>🎵 TTPlayer-Next</h3>
-                <p>版本 0.1.0</p>
+                <p>版本 {APP_VERSION}</p>
                 <p>基于 Tauri 2.0 + React 19 + Rust</p>
                 <p>致敬千千静听 TTPlayer 5.7.9</p>
                 <hr className={styles.divider} />

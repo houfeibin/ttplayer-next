@@ -4,20 +4,23 @@ import { usePlayerStore } from '@/stores/player';
 import { lyricsAutoLoad, lyricsGetLines } from '@/utils/ipc';
 
 /**
- * Drives the lyrics lifecycle in response to playback:
- *  - when the current file changes, auto-load matching lyrics (.lrc sibling
- *    or embedded tags); on miss, clear the panel.
- *  - whenever the active line changes, smooth-scroll it into view.
+ * Auto-load lyrics when the current file changes.
  *
- * Extracted from LyricsPanel so the component body only describes rendering;
- * the file-change/scroll side-effects are independently testable.
+ * This hook MUST be called from a component that stays mounted in both
+ * standard and mini mode (i.e. before any early `return` that unmounts the
+ * lyrics panel). Otherwise, switching tracks in mini mode would leave the
+ * lyrics store holding the previous track's lines, causing the desktop
+ * lyrics window to show stale text.
+ *
+ * On file change it tries to auto-load a matching `.lrc` sibling or embedded
+ * tags; on a miss it clears the store so consumers show the empty state.
  */
-export function useLyricsAutoLoad(lineRefs: React.MutableRefObject<(HTMLDivElement | null)[]>) {
+export function useLyricsLoader() {
   const currentFile = usePlayerStore((s) => s.currentFile);
-  const { lines, currentIndex, hasLyrics, setLines, setHasLyrics, clear } = useLyricsStore();
+  const setLines = useLyricsStore((s) => s.setLines);
+  const clear = useLyricsStore((s) => s.clear);
   const lastFileRef = useRef<string | null>(null);
 
-  // Auto-load lyrics when file changes
   useEffect(() => {
     if (!currentFile || currentFile === lastFileRef.current) return;
     lastFileRef.current = currentFile;
@@ -37,6 +40,15 @@ export function useLyricsAutoLoad(lineRefs: React.MutableRefObject<(HTMLDivEleme
       }
     })();
   }, [currentFile, setLines, clear]);
+}
+
+/**
+ * Smooth-scroll the active lyrics line into view whenever it changes.
+ *
+ * Pure UI concern — only relevant while the lyrics panel is mounted.
+ */
+export function useLyricsAutoLoad(lineRefs: React.MutableRefObject<(HTMLDivElement | null)[]>) {
+  const { lines, currentIndex, hasLyrics } = useLyricsStore();
 
   // Auto-scroll to current line
   useEffect(() => {

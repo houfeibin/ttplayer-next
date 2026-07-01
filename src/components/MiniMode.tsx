@@ -99,7 +99,8 @@ export default function MiniMode({ onExpand, width, height }: Props) {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        background: 'linear-gradient(180deg, #1a1025 0%, #0f0a1a 100%)',
+        // 跟随皮肤：使用主背景色渐变，与主窗口视觉风格保持一致
+        background: 'linear-gradient(180deg, var(--bg-secondary, #1a0f2e) 0%, var(--bg-primary, #0f061a) 100%)',
         borderRadius: 12,
         userSelect: 'none',
         cursor: 'grab',
@@ -110,7 +111,7 @@ export default function MiniMode({ onExpand, width, height }: Props) {
         style={{
           width: '100%',
           height: 3,
-          background: 'rgba(255, 255, 255, 0.15)',
+          background: 'var(--progress-bg, rgba(255, 255, 255, 0.15))',
           flexShrink: 0,
         }}
       >
@@ -118,7 +119,7 @@ export default function MiniMode({ onExpand, width, height }: Props) {
           style={{
             width: `${progress}%`,
             height: '100%',
-            background: 'linear-gradient(90deg, #8b5cf6, #a78bfa)',
+            background: 'linear-gradient(90deg, var(--accent, #8b5cf6), var(--accent-light, #a78bfa))',
             transition: 'width 0.3s linear',
           }}
         />
@@ -151,7 +152,7 @@ export default function MiniMode({ onExpand, width, height }: Props) {
             style={{
               fontSize: 13,
               fontWeight: 600,
-              color: '#e0d4ff',
+              color: 'var(--text-primary, #e0d4ff)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -164,7 +165,7 @@ export default function MiniMode({ onExpand, width, height }: Props) {
             <span
               style={{
                 fontSize: 11,
-                color: '#a78bfa',
+                color: 'var(--accent-light, #a78bfa)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -177,7 +178,7 @@ export default function MiniMode({ onExpand, width, height }: Props) {
           <span
             style={{
               fontSize: 10,
-              color: '#a090c0',
+              color: 'var(--text-secondary, #a090c0)',
               whiteSpace: 'nowrap',
               flexShrink: 0,
               fontVariantNumeric: 'tabular-nums',
@@ -198,7 +199,7 @@ export default function MiniMode({ onExpand, width, height }: Props) {
           }}
         >
           <button
-            style={{ ...btnBase, width: 28, height: 28, fontSize: 13, color: '#c4b5fd' }}
+            style={{ ...btnBase, width: 28, height: 28, fontSize: 13, color: 'var(--accent-light, #c4b5fd)' }}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); playPrev(); }}
             title="上一首"
             type="button"
@@ -211,10 +212,10 @@ export default function MiniMode({ onExpand, width, height }: Props) {
               width: 30,
               height: 30,
               fontSize: 14,
-              color: '#c4b5fd',
+              color: 'var(--accent-light, #c4b5fd)',
               borderRadius: '50%',
-              background: 'rgba(139, 92, 246, 0.2)',
-              border: '1px solid rgba(139, 92, 246, 0.3)',
+              background: 'rgba(var(--accent-rgb, 124, 58, 237), 0.2)',
+              border: '1px solid rgba(var(--accent-rgb, 124, 58, 237), 0.3)',
             }}
             onClick={handlePlayPause}
             title="播放/暂停"
@@ -223,7 +224,7 @@ export default function MiniMode({ onExpand, width, height }: Props) {
             {state === 'Playing' ? '⏸' : '▶'}
           </button>
           <button
-            style={{ ...btnBase, width: 28, height: 28, fontSize: 13, color: '#c4b5fd' }}
+            style={{ ...btnBase, width: 28, height: 28, fontSize: 13, color: 'var(--accent-light, #c4b5fd)' }}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); playNext(); }}
             title="下一首"
             type="button"
@@ -242,7 +243,7 @@ export default function MiniMode({ onExpand, width, height }: Props) {
           }}
         >
           <button
-            style={{ ...btnBase, width: 24, height: 24, fontSize: 12, color: '#a090c0' }}
+            style={{ ...btnBase, width: 24, height: 24, fontSize: 12, color: 'var(--text-secondary, #a090c0)' }}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onExpand(); }}
             title="展开"
             type="button"
@@ -250,7 +251,7 @@ export default function MiniMode({ onExpand, width, height }: Props) {
             ⬜
           </button>
           <button
-            style={{ ...btnBase, width: 24, height: 24, fontSize: 12, color: '#a090c0' }}
+            style={{ ...btnBase, width: 24, height: 24, fontSize: 12, color: 'var(--text-secondary, #a090c0)' }}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); winRef.current.minimize(); }}
             title="最小化"
             type="button"
@@ -258,7 +259,7 @@ export default function MiniMode({ onExpand, width, height }: Props) {
             ─
           </button>
           <button
-            style={{ ...btnBase, width: 24, height: 24, fontSize: 12, color: '#a090c0' }}
+            style={{ ...btnBase, width: 24, height: 24, fontSize: 12, color: 'var(--text-secondary, #a090c0)' }}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); winRef.current.toggleMaximize(); }}
             title={isMaximized ? '还原' : '最大化'}
             type="button"
@@ -266,12 +267,12 @@ export default function MiniMode({ onExpand, width, height }: Props) {
             {isMaximized ? '❐' : '□'}
           </button>
           <button
-            style={{ ...btnBase, width: 24, height: 24, fontSize: 12, color: '#a090c0' }}
+            style={{ ...btnBase, width: 24, height: 24, fontSize: 12, color: 'var(--text-secondary, #a090c0)' }}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); winRef.current.close(); }}
             title="关闭"
             type="button"
             onMouseEnter={(e) => { e.currentTarget.style.background = '#E94560'; e.currentTarget.style.color = '#fff'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#a090c0'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary, #a090c0)'; }}
           >
             ✕
           </button>

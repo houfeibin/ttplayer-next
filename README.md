@@ -51,7 +51,7 @@ TTPlayer-Next 是一款高性能、轻量级的跨平台桌面音乐播放器，
 - 播放控制：播放 / 暂停 / 停止 / 上一首 / 下一首 / 跳转进度
 - 音量控制与静音
 - 播放模式：顺序、循环、随机、单曲循环
-- 交叉淡入淡出（Crossfade）
+- 交叉淡入淡出（Crossfade）：余弦渐变过渡 + ring buffer drain 保证平滑切换
 - 环绕声宽度调节
 - 实时频谱分析器（256 频段下采样为 64 频段，20fps 推送）
 
@@ -81,6 +81,7 @@ TTPlayer-Next 是一款高性能、轻量级的跨平台桌面音乐播放器，
 
 - 读取音频文件属性（比特率、采样率、时长等）
 - 标签编辑（ID3v2、FLAC、APE 等）
+- 批量标签编辑：多选文件 + 独立窗口 + 字段级应用开关 + 覆盖/仅填充空字段双模式
 - 文件属性对话框
 
 ### 格式转换
@@ -148,6 +149,7 @@ ttplayer-next/
 │   │   │   └── MainPanel.tsx
 │   │   ├── SettingsPanel.tsx     # 设置面板
 │   │   ├── TagEditor.tsx         # 标签编辑器
+│   │   ├── BatchTagEditor.tsx    # 批量标签编辑器
 │   │   ├── FormatConverter.tsx   # 格式转换器
 │   │   ├── FilePropertiesDialog.tsx
 │   │   ├── MiniMode.tsx          # 迷你模式
@@ -156,6 +158,8 @@ ttplayer-next/
 │   ├── stores/                   # Zustand 状态管理
 │   ├── skins/                    # 内置皮肤资源
 │   ├── utils/                    # 工具函数（IPC 封装等）
+│   ├── batch-editor.tsx          # 批量编辑独立窗口入口
+│   ├── batch-editor.html         # 批量编辑独立页面
 │   └── App.tsx
 ├── src-tauri/                    # Tauri 应用（Rust）
 │   ├── src/
@@ -182,8 +186,11 @@ ttplayer-next/
 │   │       └── player/           # 播放器传输层
 │   ├── tt-tags/                  # 标签读写
 │   └── tt-playlist/              # 播放列表管理
+├── scripts/                      # 构建辅助脚本
+│   └── sync-version.mjs          # 集中式版本同步
 ├── e2e/                          # Playwright 端到端测试
 ├── .github/workflows/            # CI 配置
+├── version.json                  # 单一版本源
 └── Cargo.toml                    # Rust 工作区根配置
 ```
 
@@ -339,6 +346,7 @@ TTPlayer-Next 通过 Tauri 的 IPC 机制暴露了一系列命令，前端通过
 | 命令 | 说明 |
 |------|------|
 | `tags_read` / `tags_write` | 读取/写入标签 |
+| `tags_read_batch` / `tags_write_batch` | 批量读取/写入标签 |
 | `file_get_properties` | 获取文件属性 |
 
 ### 格式转换
@@ -396,6 +404,9 @@ npm run lint
 
 # 格式化
 npm run format
+
+# 版本同步（单一版本源 → 所有消费方）
+npm run sync-version
 ```
 
 ### Rust 开发
@@ -423,6 +434,20 @@ cargo fmt --all
 - **状态管理**：后端使用 `Arc<Mutex<...>>` 与 `parking_lot` 管理共享状态；前端使用 Zustand store 镜像后端状态。
 - **DSP 子系统**：均衡器、交叉淡入淡出、频谱分析、环绕声等均以独立子模块实现，使用各自的细粒度锁，避免阻塞传输层。
 - **歌词引擎**：随事件推送线程同步更新当前行索引与进度，前端无需单独轮询。
+
+### 版本管理
+
+项目采用集中式版本管理：`version.json` 是唯一版本源，修改后运行 `npm run sync-version` 即可同步至所有消费方。每次 `npm run dev` / `npm run build` 时通过 `predev` / `prebuild` 钩子自动同步，无需手动操作。
+
+| 消费方 | 方式 |
+|--------|------|
+| `Cargo.toml` `[workspace.package]` | 5 个 Rust crate 通过 `version.workspace = true` 继承 |
+| `package.json` | npm 包版本 |
+| `src-tauri/tauri.conf.json` | Tauri exe 元数据 |
+| `src/version.ts`（自动生成） | 前端 `import { APP_VERSION } from '@/version'` |
+| Rust 编译时 | `build.rs` 注入 `APP_VERSION` 环境变量 → `env!("APP_VERSION")` |
+
+> `src/version.ts` 由同步脚本自动生成，已加入 `.gitignore`，无需提交。
 
 ### 编码规范
 
@@ -483,6 +508,31 @@ cargo test -p tt-common -p tt-core -p tt-tags -p tt-playlist
 常用 type：`feat`（新功能）、`fix`（修复）、`refactor`（重构）、`docs`（文档）、`test`（测试）、`chore`（构建/工具）。
 
 ## 版本变更记录
+
+### v0.2.2
+
+本次发布聚焦于 Crossfade 淡入淡出过渡可靠性修复、批量标签编辑与集中式版本管理。
+
+#### 新增功能
+
+- **批量标签编辑**：播放列表新增「多选」模式，可同时选中多个文件进行标签编辑。支持字段级应用开关（仅修改勾选的字段）、两种写入模式（覆盖写入 / 仅填充空字段）、独立编辑窗口（皮肤/主题与主窗口实时同步）。后端使用 `lofty` 的原子临时文件策略保证写入安全
+
+#### 修复的问题
+
+- **Crossfade 切歌提前截断**：自动切歌时前一首歌曲被突然切断、淡入淡出效果完全无声。根因为 crossfade 混音完成后立即设置 `Stopped` 状态，前端随即调用 `playNext()` → `stop_inner()` flush 环形缓冲（10 秒容量），导致尚未播放的淡出尾部数据被全部丢弃。修复方案：混音完成后先等待 ring buffer 被 output callback 完全 drain（`read_pos` 追上 `write_pos`），再向事件推送线程发送 `Stopped`，确保淡出混音数据完整播放后再触发切歌。Drain 等待含三重保护：ring 排空检测、状态变更中止（手动切歌不阻塞）、自适应超时（缓冲时长 + 3 秒余量）
+- **Crossfade 完成信号竞态**：修复 `crossfade_pending` 与 `state=Stopped` 两个原子变量写入顺序不当导致的竞态窗口。原顺序为先清 `crossfade_pending` 再设 `Stopped`，事件推送线程在两个写入间隙可能观察到 `crossfadePending=false` + `state=Playing`，错误清除 `crossfadeActiveRef`，导致随后收到的 `Stopped` 不再触发 `playNext`，播放卡住。修正为先设 `Stopped` 再清 `crossfade_pending`
+- **关于面板版本号过时**：SettingsPanel 中硬编码版本 `0.1.0`，与实际 `0.2.1` 不一致。改为动态导入 `src/version.ts` 的 `APP_VERSION` 常量
+
+#### 改进
+
+- **集中式版本管理**：新增 `version.json` 作为项目唯一版本源，修改一处即可全局生效；创建 `scripts/sync-version.mjs` 同步脚本自动传播至 `Cargo.toml`、`package.json`、`tauri.conf.json`、`src/version.ts`；集成 `predev` / `prebuild` npm 钩子实现开发/构建时自动同步；`build.rs` 编译时注入 `APP_VERSION` 环境变量供 Rust 代码使用
+- **PlaybackRing 新增 `wait_until_drained` 方法**：基于 `read_notify`（`advance_read` 信号）的异步等待，驱动 crossfade drain 循环，零 CPU 轮询
+
+#### 重大变更
+
+无
+
+---
 
 ### v0.2.1
 

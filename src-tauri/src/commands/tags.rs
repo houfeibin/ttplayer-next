@@ -33,3 +33,42 @@ pub async fn tags_write(
     state.player.lock().refresh_metadata_if_current(std::path::Path::new(&path));
     Ok(())
 }
+
+/// Read tags for many files. Runs on a blocking thread because each file
+/// parse (~50ms × N) would otherwise stall the command thread.
+#[tauri::command]
+pub async fn tags_read_batch(
+    _state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<Vec<tt_tags::BatchTagResult>, String> {
+    tokio::task::spawn_blocking(move || tt_tags::read_batch(&paths))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Write tags to many files. Each file is written independently; failures on
+/// some files are reported per-file in the returned results (not as a global
+/// error) so partial success is surfaced to the user.
+///
+/// After writing, any file that matches the currently loaded track has its
+/// in-memory metadata cache refreshed so the UI updates without a restart.
+#[tauri::command]
+pub async fn tags_write_batch(
+    state: State<'_, AppState>,
+    edits: Vec<tt_tags::BatchTagEdit>,
+) -> Result<Vec<tt_tags::BatchTagResult>, String> {
+    let player = state.player.clone();
+    // Collect paths before moving `edits` into the blocking closure, so we can
+    // refresh the player's metadata cache afterwards.
+    let paths: Vec<String> = edits.iter().map(|e| e.path.clone()).collect();
+    let results = tokio::task::spawn_blocking(move || tt_tags::write_batch(&edits))
+        .await
+        .map_err(|e| e.to_string())?;
+    // Refresh metadata for any edited file that is the current track.
+    for path in &paths {
+        player
+            .lock()
+            .refresh_metadata_if_current(std::path::Path::new(path));
+    }
+    Ok(results)
+}

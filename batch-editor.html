@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TTPlayer 批量标签编辑</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      :root {
+        --bg-primary: #0f061a;
+        --bg-secondary: #1a0f2e;
+        --bg-tertiary: #251540;
+        --text-primary: #e0d4ff;
+        --text-primary-rgb: 224, 212, 255;
+        --text-secondary: #a78bfa;
+        --highlight: #f5d78a;
+        --accent: #7c3aed;
+        --accent-hover: #8b5cf6;
+        --accent-rgb: 124, 58, 237;
+        --accent-light: #C4B5FD;
+        --progress-fill: #8b5cf6;
+        --progress-bg: #2a1a4a;
+        --border-color: #3a2a5a;
+        --panel-bg: #0f061a;
+        --button-bg: #2a1a4a;
+        --button-hover: #3a2a5a;
+        --border-radius: 4px;
+        --font-title: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        --font-body: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+      }
+      html, body {
+        height: 100%;
+        background: var(--bg-primary);
+        overflow: hidden;
+        font-family: var(--font-body);
+        color: var(--text-primary);
+      }
+      #root {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/batch-editor.tsx"></script>
+  </body>
+</html>

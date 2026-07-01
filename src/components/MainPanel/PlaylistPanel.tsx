@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { listen, emitTo } from '@tauri-apps/api/event';
 import { usePlayerStore } from '@/stores/player';
 import { usePlaylistStore, pathToName, type PlayMode } from '@/stores/playlist';
 import {
@@ -30,6 +32,71 @@ export default function PlaylistPanel() {
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const modeBtnRef = useRef<HTMLButtonElement>(null);
   const [modeMenuPos, setModeMenuPos] = useState<{ top: number; left: number } | null>(null);
+
+  // ─── 多选与批量编辑 ───
+  const [selectMode, setSelectMode] = useState(false);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+
+  const toggleCheck = useCallback((path: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
+  const checkAll = useCallback(() => {
+    setChecked(new Set(items.map((i) => i.path)));
+  }, [items]);
+
+  const checkNone = useCallback(() => setChecked(new Set()), []);
+
+  /** 打开批量编辑独立窗口。创建 WebviewWindow 后，等待新窗口发出
+   *  `batch-editor-ready` 事件，再通过 `emitTo` 发送选中的文件路径。 */
+  const openBatchEditor = useCallback(async () => {
+    const selectedPaths = Array.from(checked);
+    if (selectedPaths.length === 0) return;
+
+    // 若窗口已存在则聚焦，否则创建新窗口
+    let existing: WebviewWindow | null = null;
+    try {
+      existing = await WebviewWindow.getByLabel('batch-editor');
+    } catch {
+      // 忽略：窗口不存在
+    }
+    if (existing) {
+      await existing.setFocus();
+      return;
+    }
+
+    // 创建独立窗口（无系统标题栏，使用自定义标题栏）
+    const win = new WebviewWindow('batch-editor', {
+      url: 'batch-editor.html',
+      title: '批量标签编辑',
+      width: 650,
+      height: 480,
+      minWidth: 640,
+      minHeight: 480,
+      resizable: true,
+      center: true,
+      decorations: false,
+    });
+
+    // 等待新窗口就绪后发送 paths
+    const unlistenP = listen('batch-editor-ready', async () => {
+      try {
+        await emitTo('batch-editor', 'batch-edit-paths', selectedPaths);
+      } catch (e) {
+        logWarn('emit batch-edit-paths', e);
+      }
+    });
+
+    // 窗口关闭时清理
+    win.once('tauri:destroyed', () => {
+      unlistenP.then((fn) => fn());
+    });
+  }, [checked]);
 
   // 当菜单打开时，计算按钮在视口中的位置，供 fixed 定位的菜单使用。
   useEffect(() => {
@@ -154,6 +221,28 @@ export default function PlaylistPanel() {
         <span className={styles.headerTitle}>播放列表</span>
         <div className={styles.headerRight}>
           <button
+            className={`${styles.modeSelect} ${selectMode ? styles.modeSelectActive : ''}`}
+            onClick={() => {
+              const next = !selectMode;
+              setSelectMode(next);
+              if (!next) checkNone();
+            }}
+            title="多选模式"
+            type="button"
+          >{selectMode ? `☑ ${checked.size} 项` : '☑ 多选'}</button>
+          {selectMode && (
+            <>
+              <button className={styles.modeSelect} onClick={checkAll} title="全选" type="button">全选</button>
+              <button
+                className={styles.modeSelect}
+                onClick={openBatchEditor}
+                disabled={checked.size === 0}
+                title="批量编辑标签"
+                type="button"
+              >🏷 批量编辑</button>
+            </>
+          )}
+          <button
             ref={modeBtnRef}
             className={`${styles.modeSelect} ${modeMenuOpen ? styles.modeSelectActive : ''}`}
             onClick={() => setModeMenuOpen((v) => !v)}
@@ -225,16 +314,27 @@ export default function PlaylistPanel() {
           {items.map((item, i) => {
             const name = pathToName(item.path);
             const isCurrent = i === currentIndex;
+            const isChecked = checked.has(item.path);
             return (
               <div
                 key={item.path}
                 data-index={i}
                 className={`${styles.row} ${isCurrent ? styles.active : ''}`}
-                onClick={() => handleClick(i)}
+                onClick={() => (selectMode ? toggleCheck(item.path) : handleClick(i))}
                 title={item.path}
               >
                 <div className={styles.rowInfo}>
-                  <span className={styles.index}>{i + 1}</span>
+                  {selectMode ? (
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleCheck(item.path)}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ accentColor: 'var(--accent)' }}
+                    />
+                  ) : (
+                    <span className={styles.index}>{i + 1}</span>
+                  )}
                   <span className={styles.dotIndicator}></span>
                   <span className={styles.name}>{name}</span>
                   <span className={styles.formatTag}>{item.format}</span>

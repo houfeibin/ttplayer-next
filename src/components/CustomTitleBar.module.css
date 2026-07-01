@@ -1,0 +1,68 @@
+/* 自定义标题栏 — 适配皮肤主题变量 */
+.titleBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 4px 0 14px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.titleText {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.btn {
+  width: 36px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: background 0.12s, color 0.12s;
+  font-size: 11px;
+}
+
+.btn:hover {
+  background: rgba(var(--text-primary-rgb, 255, 255, 255), 0.1);
+  color: var(--text-primary);
+}
+
+.btn:active {
+  background: rgba(var(--text-primary-rgb, 255, 255, 255), 0.16);
+}
+
+/* 关闭按钮 hover 使用红色警示 */
+.closeBtn:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.closeBtn:active {
+  background: #c50f1f;
+  color: #fff;
+}
+
+.btn svg {
+  pointer-events: none;
+}

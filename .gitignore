@@ -66,5 +66,9 @@ $RECYCLE.BIN/
 tmp/
 .eslintcache
 
+# Generated version file (single source is version.json; this file is produced
+# by scripts/sync-version.mjs at dev/build time)
+src/version.ts
+
 # WebView2 runtime data (generated at dev/runtime, should never be committed)
 .webview2-data/

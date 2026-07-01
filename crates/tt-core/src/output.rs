@@ -182,6 +182,28 @@ impl PlaybackRing {
         }
     }
 
+    /// Async wait until the ring has been fully drained (no buffered frames
+    /// left for the output callback to consume).
+    ///
+    /// Used by the crossfade path: after the mixer finishes writing the
+    /// fade-out tail, the decode thread must wait for the output callback to
+    /// actually play those samples before signaling `Stopped`. Without this,
+    /// the frontend's `playNext()` calls `stop_inner()` which flushes the
+    /// ring, discarding the un-played fade-out tail (and any un-mixed
+    /// current-track samples) — causing the "track cut off a few seconds
+    /// early, no crossfade heard" symptom.
+    ///
+    /// Resolves immediately if the ring is already empty. Driven by
+    /// `read_notify` (signalled by `advance_read`), so idle CPU stays at zero.
+    pub async fn wait_until_drained(&self) {
+        loop {
+            if self.available() == 0 {
+                return;
+            }
+            self.read_notify.notified().await;
+        }
+    }
+
     pub fn position_ms(&self) -> u64 {
         let inner = self.inner.lock();
         if self.sample_rate == 0 { return 0; }

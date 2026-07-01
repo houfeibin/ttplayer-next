@@ -73,7 +73,11 @@ async function emitSkinChanged(payload: { skinId: string; css: string }): Promis
   let lastErr: unknown = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await emitTo('lyrics-desktop', 'skin-changed', payload);
+      // 通知桌面歌词窗口和批量编辑器窗口（如果打开）
+      await Promise.allSettled([
+        emitTo('lyrics-desktop', 'skin-changed', payload),
+        emitTo('batch-editor', 'skin-changed', payload),
+      ]);
       return;
     } catch (e) {
       lastErr = e;

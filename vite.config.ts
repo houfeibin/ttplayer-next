@@ -23,6 +23,7 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, 'index.html'),
         'lyrics-desktop': path.resolve(__dirname, 'lyrics-desktop.html'),
+        'batch-editor': path.resolve(__dirname, 'batch-editor.html'),
       },
     },
   },

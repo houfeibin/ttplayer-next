@@ -255,6 +255,119 @@ fn atomic_temp_path(path: &Path) -> std::path::PathBuf {
     parent.join(name)
 }
 
+// ── batch operations ───────────────────────────────────────────────────────
+
+/// One file's lightweight tag view for the batch editor. Unlike
+/// `SongMetadata`, this omits audio properties and cover art (which would be
+/// expensive to base64-encode for hundreds of files) and only carries the
+/// editable text fields the batch UI needs.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct BatchTagView {
+    pub path: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub album_artist: String,
+    pub year: Option<u32>,
+    pub track: Option<u32>,
+    pub genre: String,
+    pub comment: String,
+}
+
+impl From<SongMetadata> for BatchTagView {
+    fn from(m: SongMetadata) -> Self {
+        Self {
+            path: String::new(),
+            title: m.title,
+            artist: m.artist,
+            album: m.album,
+            album_artist: m.album_artist,
+            year: m.year,
+            track: m.track,
+            genre: m.genre,
+            comment: m.comment,
+        }
+    }
+}
+
+/// Read tags for many files, returning one entry per input path. Files that
+/// fail to parse are returned with an empty view + `error` set, so the caller
+/// can still show them in the list (greyed out) rather than silently dropping
+/// them.
+pub fn read_batch(paths: &[String]) -> Vec<BatchTagResult> {
+    paths
+        .iter()
+        .map(|p| {
+            let path = Path::new(p);
+            match read(path) {
+                Ok(m) => {
+                    let mut view: BatchTagView = m.into();
+                    view.path = p.clone();
+                    BatchTagResult { ok: view, err: None }
+                }
+                Err(e) => BatchTagResult {
+                    ok: BatchTagView { path: p.clone(), ..Default::default() },
+                    err: Some(e.to_string()),
+                },
+            }
+        })
+        .collect()
+}
+
+/// Per-file outcome of a batch write: the original path plus an optional
+/// error message (None on success).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BatchTagResult {
+    pub ok: BatchTagView,
+    pub err: Option<String>,
+}
+
+/// Per-file write request: path + the field updates to apply (same key set as
+/// `write`).
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct BatchTagEdit {
+    pub path: String,
+    pub updates: std::collections::HashMap<String, String>,
+}
+
+/// Write tags to many files. Each file is written independently with the same
+/// atomic-save strategy as `write`; a failure on one file does not abort the
+/// rest. Returns one result per input edit (in order).
+pub fn write_batch(edits: &[BatchTagEdit]) -> Vec<BatchTagResult> {
+    edits
+        .iter()
+        .map(|edit| {
+            let path = Path::new(&edit.path);
+            // Re-read the current view so the caller can refresh its state
+            // even when an error occurs.
+            let view = read(path).map(|m| {
+                let mut v: BatchTagView = m.into();
+                v.path = edit.path.clone();
+                v
+            });
+            match (write(path, &edit.updates), view) {
+                (Ok(()), Ok(mut v)) => {
+                    // Re-read after write so `v` reflects the new state.
+                    if let Ok(m) = read(path) {
+                        v = BatchTagView::from(m);
+                        v.path = edit.path.clone();
+                    }
+                    BatchTagResult { ok: v, err: None }
+                }
+                (Err(we), Ok(v)) => BatchTagResult { ok: v, err: Some(we.to_string()) },
+                (Ok(()), Err(re)) => BatchTagResult {
+                    ok: BatchTagView { path: edit.path.clone(), ..Default::default() },
+                    err: Some(re.to_string()),
+                },
+                (Err(we), Err(re)) => BatchTagResult {
+                    ok: BatchTagView { path: edit.path.clone(), ..Default::default() },
+                    err: Some(format!("write: {} | read: {}", we, re)),
+                },
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

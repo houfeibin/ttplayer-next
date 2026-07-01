@@ -7,6 +7,7 @@ import { useHotkeys } from '@/hooks/useHotkeys';
 import { usePlaybackActions } from '@/hooks/usePlaybackActions';
 import { useTicker } from '@/hooks/useTicker';
 import { useDesktopLyrics } from '@/hooks/useDesktopLyrics';
+import { useLyricsLoader } from '@/hooks/useLyricsAutoLoad';
 import { getCurrentWindow, LogicalSize, PhysicalPosition, availableMonitors } from '@tauri-apps/api/window';
 import Equalizer from './Equalizer';
 import LyricsPanel from './LyricsPanel';
@@ -39,6 +40,10 @@ export default function MainPanel() {
   // cleanup 会停止向桌面歌词窗口推送 lyrics-update，导致窗口冻结。
   // 提升到 MainPanel 后，迷你模式下 hook 保持活跃，桌面歌词持续更新。
   const { toggleDesktopLyrics, desktopLyricsActive } = useDesktopLyrics();
+  // 歌词自动加载同样必须在 `if (miniMode) return` 之前调用：
+  // 迷你模式下 LyricsPanel 卸载后，若文件切换时不重新加载歌词行，
+  // lyrics store 仍保留上一首的 lines，桌面歌词会显示过时歌词。
+  useLyricsLoader();
 
   // ─── UI toggles ───
   const [miniMode, setMiniMode] = useState(false);

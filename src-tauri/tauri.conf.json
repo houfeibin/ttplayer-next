@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "TTPlayer-Next",
-        "width": 820,
-        "height": 620,
+        "width": 800,
+        "height": 600,
         "resizable": true,
         "decorations": false,
         "center": true,
@@ -29,10 +29,14 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.ico"],
+    "icon": [
+      "icons/icon.ico"
+    ],
     "windows": {
       "nsis": {
-        "languages": ["SimpChinese"]
+        "languages": [
+          "SimpChinese"
+        ]
       }
     }
   }

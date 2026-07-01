@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capability for TTPlayer-Next",
-  "windows": ["main", "lyrics-desktop"],
+  "windows": ["main", "lyrics-desktop", "batch-editor"],
   "permissions": [
     "core:default",
     "dialog:default",

@@ -514,3 +514,37 @@ export async function fileGetProperties(path: string): Promise<FileProperties> {
 export async function tagsWrite(path: string, updates: Record<string, string>): Promise<void> {
   return invoke('tags_write', { path, updates });
 }
+
+// ============================================================
+// Batch Tag IPC
+// ============================================================
+
+export interface BatchTagView {
+  path: string;
+  title: string;
+  artist: string;
+  album: string;
+  albumArtist: string;
+  year?: number;
+  track?: number;
+  genre: string;
+  comment: string;
+}
+
+export interface BatchTagResult {
+  ok: BatchTagView;
+  err: string | null;
+}
+
+export interface BatchTagEdit {
+  path: string;
+  updates: Record<string, string>;
+}
+
+export async function tagsReadBatch(paths: string[]): Promise<BatchTagResult[]> {
+  return invoke('tags_read_batch', { paths });
+}
+
+export async function tagsWriteBatch(edits: BatchTagEdit[]): Promise<BatchTagResult[]> {
+  return invoke('tags_write_batch', { edits });
+}
